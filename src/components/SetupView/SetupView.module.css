@@ -1,0 +1,815 @@
+/* ── Root ── */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Top bar ── */
+
+.topBar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 32px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.topBarLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.doneBtn {
+  padding: 10px 24px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: opacity 0.12s, transform 0.1s;
+}
+.doneBtn:hover { opacity: 0.88; transform: translateY(-1px); }
+
+/* ── Cards row ── */
+
+.cards {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 32px 32px;
+  overflow-x: auto;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ── Character card ── */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 320px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* ── Card header ── */
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.charInitial {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.charPortrait {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.charNameRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.updateSkillsBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transition: background 0.1s, opacity 0.1s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.updateSkillsBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.updateSkillsBtnCooldown {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: transparent;
+  cursor: default;
+}
+
+.charName {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.piEnabledBadge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #5db87a;
+  border: 1px solid rgba(93, 184, 122, 0.5);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.planetCount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.removeCharBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+.removeCharBtn:hover { background: rgba(224,64,64,.2); color: var(--danger); }
+
+/* ── Inline edit ── */
+
+.inlineName {
+  cursor: pointer;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 3px;
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.inlineName:hover { background: var(--bg-hover); }
+.inlineName:hover .editHint { opacity: 1; }
+
+.editHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+
+.inlineInput {
+  background: var(--bg-deep);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: inherit;
+  font-family: inherit;
+  padding: 1px 5px;
+  outline: none;
+  max-width: 100%;
+}
+
+/* ── Skills toggle ── */
+
+.skillsToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  width: 100%;
+  text-align: left;
+  transition: background 0.1s;
+}
+.skillsToggle:hover { background: var(--bg-hover); }
+
+.skillsLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.skillsSummaryRow {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.skillChip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-deep, rgba(0,0,0,0.2));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.chipIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.skillChipTraining {
+  border-color: rgba(74, 176, 149, 0.4) !important;
+  background: rgba(74, 176, 149, 0.08) !important;
+}
+
+.skillChipOverride {
+  border-color: rgba(74, 176, 149, 0.5) !important;
+  border-style: dashed !important;
+  background: rgba(74, 176, 149, 0.06) !important;
+}
+
+.chipTraining {
+  font-size: 9px;
+  font-weight: 700;
+  color: #4ab095;
+  white-space: nowrap;
+}
+
+.skillTrainingRow {
+  font-size: 10px;
+  color: #4ab095;
+  font-weight: 600;
+  padding: 2px 10px 5px;
+}
+
+.chipVal {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+}
+
+.chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.skillsPanel {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-deep);
+}
+
+.clearOverridesBtn {
+  width: 100%;
+  padding: 6px 14px;
+  text-align: left;
+  font-size: 11px;
+  color: #4ab095;
+  background: rgba(74, 176, 149, 0.06);
+  border-bottom: 1px solid rgba(74, 176, 149, 0.15);
+  transition: background 0.1s;
+}
+.clearOverridesBtn:hover { background: rgba(74, 176, 149, 0.12); }
+
+/* Override SkillEditor row for compact display inside card */
+.skillsPanel :global(.skillRow) {
+  padding: 10px 14px;
+}
+
+/* ── Planet picker ── */
+
+.planetPicker {
+  padding: 10px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pickerLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.typePills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.typePill {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: color-mix(in srgb, var(--planet-color) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--planet-color) 80%, transparent);
+  transition: background 0.12s, transform 0.08s;
+  white-space: nowrap;
+}
+.typePill:hover {
+  background: var(--planet-color);
+  transform: translateY(-1px);
+}
+
+/* ── Planet list ── */
+
+.planetList {
+  display: flex;
+  flex-direction: column;
+}
+
+.planetGroupHeader {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  padding: 5px 16px 3px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+.planetGroupHeader:first-of-type {
+  border-top: none;
+}
+
+.planetSortBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.planetSortLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.planetSortBtn {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+.planetSortBtn:hover { color: var(--text-primary); border-color: var(--border); }
+
+.planetSortBtnActive {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.planetEntry {
+  border-bottom: 1px solid var(--border);
+}
+.planetEntry:last-child { border-bottom: none; }
+
+.planetRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  transition: background 0.1s;
+}
+.planetRow:hover { background: var(--bg-hover); }
+
+.planetTypeCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  width: 32px;
+}
+
+.planetDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.planetTypeLabel {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1;
+}
+
+/* two-line center block */
+.planetInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.planetInfoTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.planetInfoBottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.planetNameWrap {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.planetName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  max-width: 100%;
+}
+
+
+.planetMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.metaIconStat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.iskPerHr {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+  margin-left: auto;
+}
+
+.iskPerHrIdle {
+  opacity: 0.35;
+  font-style: italic;
+}
+
+.idleBadge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #c08030;
+  border: 1px solid rgba(192, 128, 48, 0.5);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.expiry_ok {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5db87a;
+}
+
+.expiry_warning {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c8a030;
+}
+
+.expiry_critical {
+  font-size: 11px;
+  font-weight: 700;
+  color: #d07030;
+}
+
+.expiry_expired {
+  font-size: 11px;
+  font-weight: 700;
+  color: #d05050;
+}
+
+.outputChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--pill-color, var(--accent)) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pill-color, var(--accent)) 60%, transparent);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s;
+  flex-shrink: 0;
+}
+.outputChip:hover {
+  background: color-mix(in srgb, var(--pill-color, var(--accent)) 30%, transparent);
+}
+
+.outputTier {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--pill-color, var(--accent));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.planetKindIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+
+/* ── Top bar right ── */
+
+.topBarRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.importWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.importBtn {
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.importBtn:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+.importBtn:disabled {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 0.7;
+  cursor: default;
+}
+
+.importHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.importError {
+  font-size: 11px;
+  color: var(--danger);
+  text-align: right;
+  max-width: 260px;
+}
+
+/* ── Modal ── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+
+.modalTitle {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.modalText {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.modalCode {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.modalLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.modalInput {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.modalInput:focus { border-color: var(--accent); }
+
+.modalError {
+  font-size: 12px;
+  color: var(--danger);
+  background: rgba(224,64,64,0.08);
+  border: 1px solid rgba(224,64,64,0.3);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+
+.modalActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.modalCancel {
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  transition: color 0.1s, border-color 0.1s;
+}
+.modalCancel:hover { color: var(--text-primary); border-color: var(--border-bright); }
+
+.modalConfirm {
+  padding: 9px 20px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  transition: opacity 0.12s;
+}
+.modalConfirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.modalConfirm:not(:disabled):hover { opacity: 0.88; }
+
+/* ── Add character button ── */
+
+.addCharCard {
+  width: 320px;
+  min-width: 320px;
+  min-height: 120px;
+  border: 2px dashed var(--border-bright);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  flex-shrink: 0;
+}
+
+.addCharCard .importHint {
+  text-align: center;
+}
+
+.addCharCard .importError {
+  text-align: center;
+}
+
+.manualAddBtn {
+  margin-top: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.manualAddBtn:hover {
+  color: var(--text-secondary);
+}
+
+

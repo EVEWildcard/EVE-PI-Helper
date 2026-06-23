@@ -1,0 +1,41 @@
+.crashed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: rgba(224, 64, 64, 0.12);
+  border: 1px solid rgba(224, 64, 64, 0.35);
+  border-radius: var(--radius);
+  margin: 20px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.icon {
+  color: var(--danger);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.msg {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.msg strong {
+  color: var(--danger);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.reset {
+  padding: 3px 10px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  flex-shrink: 0;
+  transition: color 0.1s, border-color 0.1s;
+}
+.reset:hover { color: var(--text-primary); border-color: var(--danger); }

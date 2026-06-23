@@ -1,0 +1,84 @@
+:root {
+  --bg-deep:    #0a0c10;
+  --bg-base:    #0d0f14;
+  --bg-surface: #141820;
+  --bg-card:    #1a1f2e;
+  --bg-hover:   #1f2535;
+
+  --border:     #2a3040;
+  --border-bright: #3a4560;
+
+  --text-primary:   #c8d8f0;
+  --text-secondary: #7890b0;
+  --text-muted:     #4a5870;
+
+  --accent:     #4a90d9;
+  --accent-dim: #2a5090;
+  --accent-glow: rgba(74, 144, 217, 0.15);
+
+  --ok:      #4caf70;
+  --warn:    #e0a030;
+  --danger:  #e04040;
+  --info:    #4a90d9;
+
+  --p0: #607060;
+  --p1: #4a7090;
+  --p2: #6050a0;
+  --p3: #905040;
+  --p4: #a07020;
+
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Consolas', monospace;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+@keyframes pipSweepLine {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(500%); }
+}
+
+a { color: var(--accent); text-decoration: none; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.badge-p0 { background: var(--p0); color: #fff; }
+.badge-p1 { background: var(--p1); color: #fff; }
+.badge-p2 { background: var(--p2); color: #fff; }
+.badge-p3 { background: var(--p3); color: #fff; }
+.badge-p4 { background: var(--p4); color: #fff; }
+.badge-ok     { background: rgba(76,175,112,0.2); color: var(--ok); border: 1px solid rgba(76,175,112,0.3); }
+.badge-warn   { background: rgba(224,160,48,0.2); color: var(--warn); border: 1px solid rgba(224,160,48,0.3); }
+.badge-danger { background: rgba(224,64,64,0.2);  color: var(--danger); border: 1px solid rgba(224,64,64,0.3); }
