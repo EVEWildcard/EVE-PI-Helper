@@ -254,7 +254,7 @@ export const SCHEMATIC_INPUTS_BY_NAME = new Map<string, string[]>(
   ALL_SCHEMATICS.map((s) => {
     const outputName = PRODUCT_BY_TYPE_ID.get(s.output.typeId)?.name ?? ''
     const inputNames = s.inputs.map((i) => PRODUCT_BY_TYPE_ID.get(i.typeId)?.name).filter(Boolean) as string[]
-    return [outputName, inputNames]
+    return [outputName, inputNames] as [string, string[]]
   }).filter(([name]) => name !== '')
 )
 
