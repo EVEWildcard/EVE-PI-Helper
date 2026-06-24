@@ -1,14 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import type { StoredCharacter, Planet } from '../../types/api'
-import { PRODUCT_BY_TYPE_ID, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
+import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import styles from './HaulPlan.module.css'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-function systemFromPlanetName(name: string): string {
-  return name.replace(/\s+[IVX]+(?:\s.*)?$/, '').trim() || name
-}
 
 type Urgency = 'expired' | 'critical' | 'warning' | 'ok' | 'idle'
 
@@ -41,7 +37,7 @@ function formatReadyAt(expiryTime: Date, now: number): string {
 }
 
 const URGENCY_ORDER: Record<Urgency, number> = { expired: 0, critical: 1, warning: 2, ok: 3, idle: 4 }
-
+const TIER_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
 const TIER_COLOR: Record<string, string> = {
   P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
 }
@@ -50,53 +46,8 @@ function isExtractorPlanet(planet: Planet): boolean {
   return (planet.outputTiers ?? []).some(t => t === 'P1')
 }
 
-// ── Stage 1 model ─────────────────────────────────────────────────────────────
-
-function computeFeederIds(characters: StoredCharacter[]): Set<number> {
-  // For each factory planet, find which OTHER chars produce its inputs → they're feeders
-  const producerByName = new Map<string, Set<number>>()
-  for (const char of characters) {
-    for (const planet of char.planets) {
-      for (const name of planet.outputNames ?? []) {
-        if (!name) continue
-        if (!producerByName.has(name)) producerByName.set(name, new Set())
-        producerByName.get(name)!.add(char.characterId)
-      }
-    }
-  }
-  const feederIds = new Set<number>()
-  for (const toChar of characters) {
-    for (const toPlanet of toChar.planets) {
-      const needed = new Set<string>()
-      for (const out of toPlanet.outputNames ?? [])
-        for (const inp of SCHEMATIC_INPUTS_BY_NAME.get(out) ?? [])
-          needed.add(inp)
-      for (const inp of needed) {
-        for (const pid of producerByName.get(inp) ?? [])
-          if (pid !== toChar.characterId) feederIds.add(pid)
-      }
-    }
-  }
-  return feederIds
-}
-
-function charExtractionUrgency(char: StoredCharacter, now: number): number {
-  const extractors = char.planets.filter(isExtractorPlanet)
-  if (extractors.length === 0) return 99
-  return Math.min(...extractors.map(p => URGENCY_ORDER[getUrgency(p, now)]))
-}
-
-function sortCharsByDependency(
-  characters: StoredCharacter[],
-  feederIds: Set<number>,
-  now: number,
-): StoredCharacter[] {
-  return [...characters].sort((a, b) => {
-    const af = feederIds.has(a.characterId) ? 0 : 1
-    const bf = feederIds.has(b.characterId) ? 0 : 1
-    if (af !== bf) return af - bf
-    return charExtractionUrgency(a, now) - charExtractionUrgency(b, now)
-  })
+function tierOf(name: string): string {
+  return PRODUCT_BY_NAME.get(name)?.tier ?? 'P1'
 }
 
 function findReadyAt(characters: StoredCharacter[]): Date | null {
@@ -111,85 +62,206 @@ function findReadyAt(characters: StoredCharacter[]): Date | null {
   return earliest
 }
 
-// ── Stage 2 model ─────────────────────────────────────────────────────────────
+// ── per-alt plan model ──────────────────────────────────────────────────────
 
-interface DeliveryTask {
-  key: string
-  inputName: string
-  inputTier: string
-  toPlanet: Planet
-  toChar: StoredCharacter
-  outputNames: string[]
+interface DeliverInput {
+  material: string
+  tier: string
+  ready: boolean      // can be dropped this login (source already collected, or your own)
+  self: boolean       // produced on one of your own planets
+  fromName?: string   // ready pickup: which alt left it in the container
+  waitName?: string   // deferred: which alt produces it later (come back after)
   urgency: Urgency
 }
 
-function computeDeliveries(characters: StoredCharacter[], now: number): DeliveryTask[] {
-  const allProduced = new Set<string>()
-  for (const char of characters)
-    for (const planet of char.planets)
-      for (const name of planet.outputNames ?? [])
-        if (name) allProduced.add(name)
+interface DeliverStop {
+  planet: Planet
+  outputs: { name: string; tier: string }[]
+  inputs: DeliverInput[]
+}
 
+interface ResetItem { planet: Planet; p1s: string[]; urgency: Urgency }
+interface DepositItem { material: string; tier: string; toNames: string[] }
+
+interface AltStep {
+  char: StoredCharacter
+  verbs: string[]
+  resets: ResetItem[]
+  stops: DeliverStop[]
+  deposits: DepositItem[]
+  taskKeys: string[]
+}
+
+function resetKey(p: Planet): string { return `reset|${p.planetId}` }
+function deliverKey(p: Planet, material: string): string { return `deliver|${p.planetId}|${material}` }
+function depositKey(charId: number, material: string): string { return `deposit|${charId}|${material}` }
+
+function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
+  // ── indexes ──
+  const producedByChar = new Map<number, Set<string>>()
+  const producerCharsByMaterial = new Map<string, Set<number>>()
+  const neededByChar = new Map<number, Set<string>>()
+  const allProduced = new Set<string>()
+  const nameById = new Map<number, string>()
   const inputUrgency = new Map<string, Urgency>()
+
   for (const char of characters) {
+    nameById.set(char.characterId, char.characterName)
+    const made = new Set<string>()
     for (const planet of char.planets) {
       const u = getUrgency(planet, now)
       for (const name of planet.outputNames ?? []) {
         if (!name) continue
+        made.add(name)
+        allProduced.add(name)
+        if (!producerCharsByMaterial.has(name)) producerCharsByMaterial.set(name, new Set())
+        producerCharsByMaterial.get(name)!.add(char.characterId)
         const prev = inputUrgency.get(name)
-        if (prev === undefined || URGENCY_ORDER[u] < URGENCY_ORDER[prev])
-          inputUrgency.set(name, u)
+        if (prev === undefined || URGENCY_ORDER[u] < URGENCY_ORDER[prev]) inputUrgency.set(name, u)
       }
     }
+    producedByChar.set(char.characterId, made)
   }
 
-  const tasks: DeliveryTask[] = []
-  const seen = new Set<string>()
-
-  for (const toChar of characters) {
-    for (const toPlanet of toChar.planets) {
-      const outputNames = toPlanet.outputNames ?? []
-      if (outputNames.length === 0) continue
-
-      const neededInputs = new Set<string>()
-      for (const out of outputNames)
+  for (const char of characters) {
+    const needs = new Set<string>()
+    for (const planet of char.planets)
+      for (const out of planet.outputNames ?? [])
         for (const inp of SCHEMATIC_INPUTS_BY_NAME.get(out) ?? [])
-          neededInputs.add(inp)
-      if (neededInputs.size === 0) continue
-
-      for (const inputName of neededInputs) {
-        if (!allProduced.has(inputName)) continue
-        if (outputNames.includes(inputName)) continue
-
-        let needsHaul = false
-        outer: for (const char of characters) {
-          for (const planet of char.planets) {
-            if (!(planet.outputNames ?? []).includes(inputName)) continue
-            if (planet.planetId !== toPlanet.planetId) { needsHaul = true; break outer }
-          }
-        }
-        if (!needsHaul) continue
-
-        const key = `${inputName}|${toPlanet.planetId}`
-        if (seen.has(key)) continue
-        seen.add(key)
-
-        const resolvedInput = [...PRODUCT_BY_TYPE_ID.values()].find(p => p.name === inputName)
-
-        tasks.push({
-          key,
-          inputName,
-          inputTier: resolvedInput?.tier ?? 'P1',
-          toPlanet,
-          toChar,
-          outputNames,
-          urgency: inputUrgency.get(inputName) ?? 'idle',
-        })
-      }
-    }
+          if (allProduced.has(inp)) needs.add(inp)
+    neededByChar.set(char.characterId, needs)
   }
 
-  return tasks
+  // ── login order: extractors/low-tier first, then by extractor urgency ──
+  function maxTier(char: StoredCharacter): number {
+    let r = 0
+    for (const p of char.planets) for (const t of p.outputTiers ?? []) r = Math.max(r, TIER_RANK[t] ?? 0)
+    return r
+  }
+  function extractionUrgency(char: StoredCharacter): number {
+    const ex = char.planets.filter(isExtractorPlanet)
+    return ex.length ? Math.min(...ex.map(p => URGENCY_ORDER[getUrgency(p, now)])) : 99
+  }
+  const order = [...characters].sort((a, b) =>
+    maxTier(a) - maxTier(b) ||
+    extractionUrgency(a) - extractionUrgency(b) ||
+    a.characterName.localeCompare(b.characterName)
+  )
+  const orderIndex = new Map<number, number>()
+  order.forEach((c, i) => orderIndex.set(c.characterId, i))
+
+  // ── availability accumulator (what's in the container as you progress) ──
+  const availableBefore = new Map<number, Set<string>>()
+  const acc = new Set<string>()
+  for (const char of order) {
+    availableBefore.set(char.characterId, new Set(acc))
+    for (const m of producedByChar.get(char.characterId) ?? []) acc.add(m)
+  }
+
+  // ── build a step per alt ──
+  return order.map(char => {
+    const cid = char.characterId
+    const own = producedByChar.get(cid)!
+    const before = availableBefore.get(cid)!
+
+    const resets: ResetItem[] = char.planets
+      .filter(isExtractorPlanet)
+      .map(p => ({
+        planet: p,
+        p1s: (p.outputNames ?? []).filter((_, i) => (p.outputTiers ?? [])[i] === 'P1'),
+        urgency: getUrgency(p, now),
+      }))
+      .sort((a, b) => URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency])
+
+    const stops: DeliverStop[] = []
+    for (const planet of char.planets) {
+      const outputs = (planet.outputNames ?? []).map((n, i) => ({ name: n, tier: (planet.outputTiers ?? [])[i] ?? 'P2' }))
+      const needed = new Set<string>()
+      for (const out of planet.outputNames ?? [])
+        for (const inp of SCHEMATIC_INPUTS_BY_NAME.get(out) ?? [])
+          if (allProduced.has(inp)) needed.add(inp)
+      if (needed.size === 0) continue
+
+      const inputs: DeliverInput[] = [...needed].map(material => {
+        const self = own.has(material)
+        const others = [...(producerCharsByMaterial.get(material) ?? [])].filter(id => id !== cid)
+        let ready = self
+        let fromName: string | undefined
+        let waitName: string | undefined
+        if (!self) {
+          const earlier = others.find(id => (orderIndex.get(id) ?? 0) < (orderIndex.get(cid) ?? 0))
+          if (earlier != null) { ready = true; fromName = nameById.get(earlier) }
+          else {
+            const later = others.sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0))[0]
+            if (later != null) waitName = nameById.get(later)
+          }
+        } else if (before.has(material)) {
+          // also stocked by an earlier alt — still your own, leave note off
+        }
+        return {
+          material,
+          tier: tierOf(material),
+          ready,
+          self,
+          fromName,
+          waitName,
+          urgency: inputUrgency.get(material) ?? 'idle',
+        }
+      }).sort((a, b) => Number(b.ready) - Number(a.ready) || URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency])
+
+      stops.push({ planet, outputs, inputs })
+    }
+    stops.sort((a, b) => {
+      const ua = Math.min(99, ...a.inputs.map(i => URGENCY_ORDER[i.urgency]))
+      const ub = Math.min(99, ...b.inputs.map(i => URGENCY_ORDER[i.urgency]))
+      return ua - ub
+    })
+
+    const deposits: DepositItem[] = [...own]
+      .map(material => {
+        const toNames = characters
+          .filter(c2 => c2.characterId !== cid && (neededByChar.get(c2.characterId)?.has(material) ?? false))
+          .map(c2 => c2.characterName)
+        return { material, tier: tierOf(material), toNames }
+      })
+      .filter(d => d.toNames.length > 0)
+      .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier])
+
+    // verbs
+    const hasPickup = stops.some(s => s.inputs.some(i => i.ready && !i.self))
+    const verbs: string[] = []
+    if (resets.length) { verbs.push('Reset', 'Collect') }
+    if (deposits.length) verbs.push('Input')
+    if (hasPickup) verbs.push('Pickup')
+    if (stops.length) verbs.push('Deliver')
+
+    const taskKeys: string[] = [
+      ...resets.map(r => resetKey(r.planet)),
+      ...stops.flatMap(s => s.inputs.map(i => deliverKey(s.planet, i.material))),
+      ...deposits.map(d => depositKey(cid, d.material)),
+    ]
+
+    return { char, verbs, resets, stops, deposits, taskKeys }
+  })
+}
+
+const VERB_PHRASE: Record<string, string> = {
+  Reset: 'Reset', Collect: 'Collect',
+  Input: 'Input into shared PI container',
+  Pickup: 'Pick up from container', Deliver: 'Deliver',
+}
+
+// ── persistence ──────────────────────────────────────────────────────────────
+
+const STORAGE_KEY_CHECKED = 'haulplan.checked'
+const STORAGE_KEY_STEP    = 'haulplan.step'
+
+function loadChecked(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY_CHECKED) ?? '[]')) }
+  catch { return new Set() }
+}
+function saveChecked(s: Set<string>) {
+  localStorage.setItem(STORAGE_KEY_CHECKED, JSON.stringify([...s]))
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -200,18 +272,7 @@ interface Props {
   onRefresh?: () => Promise<void>
 }
 
-const STORAGE_KEY_RESETS   = 'haulplan.resets.checked'
-const STORAGE_KEY_DELIVERS = 'haulplan.checked'
-
-function loadChecked(key: string): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(key) ?? '[]')) }
-  catch { return new Set() }
-}
-function saveChecked(key: string, s: Set<string>) {
-  localStorage.setItem(key, JSON.stringify([...s]))
-}
-
-export function HaulPlan({ characters, prices, onRefresh }: Props) {
+export function HaulPlan({ characters, onRefresh }: Props) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
@@ -224,76 +285,56 @@ export function HaulPlan({ characters, prices, onRefresh }: Props) {
     return () => clearInterval(id)
   }, [onRefresh])
 
-  const feederIds  = useMemo(() => computeFeederIds(characters), [characters])
-  const orderedChars = useMemo(() => sortCharsByDependency(characters, feederIds, now), [characters, feederIds, now])
-  const readyAt    = useMemo(() => findReadyAt(characters), [characters])
-  const tasks      = useMemo(() => computeDeliveries(characters, now), [characters, now])
+  const steps = useMemo(() => computeSteps(characters, now), [characters, now])
+  const readyAt = useMemo(() => findReadyAt(characters), [characters])
 
-  const [resets,    setResets]    = useState<Set<string>>(() => loadChecked(STORAGE_KEY_RESETS))
-  const [checked,   setChecked]   = useState<Set<string>>(() => loadChecked(STORAGE_KEY_DELIVERS))
+  const [checked, setChecked] = useState<Set<string>>(loadChecked)
+  const [active, setActive] = useState<number>(() => {
+    const v = parseInt(localStorage.getItem(STORAGE_KEY_STEP) ?? '0', 10)
+    return Number.isFinite(v) ? v : 0
+  })
 
-  function toggleReset(key: string) {
-    setResets(prev => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      saveChecked(STORAGE_KEY_RESETS, next)
-      return next
-    })
-  }
+  const activeIdx = Math.min(active, Math.max(0, steps.length - 1))
+  useEffect(() => { localStorage.setItem(STORAGE_KEY_STEP, String(activeIdx)) }, [activeIdx])
 
   function toggle(key: string) {
     setChecked(prev => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
-      saveChecked(STORAGE_KEY_DELIVERS, next)
+      saveChecked(next)
       return next
     })
   }
 
+  function completeAndNext(step: AltStep) {
+    setChecked(prev => {
+      const next = new Set(prev)
+      for (const k of step.taskKeys) next.add(k)
+      saveChecked(next)
+      return next
+    })
+    setActive(i => Math.min(steps.length - 1, i + 1))
+  }
+
   function clearAll() {
     const empty = new Set<string>()
-    setResets(empty);  saveChecked(STORAGE_KEY_RESETS, empty)
-    setChecked(empty); saveChecked(STORAGE_KEY_DELIVERS, empty)
+    setChecked(empty)
+    saveChecked(empty)
   }
 
   if (characters.length === 0)
     return <div className={styles.empty}>Add characters to see the hauling plan.</div>
 
-  // ── Stage 1: chars with extraction planets ──
-  const charsWithExtractors = orderedChars.filter(c => c.planets.some(isExtractorPlanet))
-
-  // Total checkable items
-  const totalResetItems = charsWithExtractors.reduce((s, c) =>
-    s + c.planets.filter(isExtractorPlanet).length, 0)
-  const doneResets    = charsWithExtractors.reduce((s, c) =>
-    s + c.planets.filter(p => isExtractorPlanet(p) && resets.has(`reset|${p.planetId}`)).length, 0)
-  const doneDeliveries = tasks.filter(t => checked.has(t.key)).length
-  const totalItems = totalResetItems + tasks.length
-  const doneItems  = doneResets + doneDeliveries
-
-  // ── Stage 2: group by char → planet ──
-  const byChar = new Map<string, { char: StoredCharacter; byPlanet: Map<number, DeliveryTask[]> }>()
-  for (const t of tasks) {
-    const cid = String(t.toChar.characterId)
-    if (!byChar.has(cid)) byChar.set(cid, { char: t.toChar, byPlanet: new Map() })
-    const { byPlanet } = byChar.get(cid)!
-    if (!byPlanet.has(t.toPlanet.planetId)) byPlanet.set(t.toPlanet.planetId, [])
-    byPlanet.get(t.toPlanet.planetId)!.push(t)
-  }
-
-  // Deliver chars in dependency order (same orderedChars order)
-  const deliverChars = orderedChars
-    .filter(c => byChar.has(String(c.characterId)))
-    .map(c => byChar.get(String(c.characterId))!)
-
-  // chars that appear in both stages (need two logins or careful ordering)
-  const doubleLoginIds = new Set(
-    charsWithExtractors
-      .filter(c => byChar.has(String(c.characterId)))
-      .map(c => c.characterId)
-  )
+  const allKeys = steps.flatMap(s => s.taskKeys)
+  const doneItems = allKeys.filter(k => checked.has(k)).length
+  const totalItems = allKeys.length
 
   const isOverdue = readyAt ? readyAt.getTime() <= now : false
+  const step = steps[activeIdx]
+
+  function stepDone(s: AltStep): boolean {
+    return s.taskKeys.length > 0 && s.taskKeys.every(k => checked.has(k))
+  }
 
   return (
     <div className={styles.root}>
@@ -308,9 +349,7 @@ export function HaulPlan({ characters, prices, onRefresh }: Props) {
           )}
           <div className={styles.topBarActions}>
             <span className={styles.progressLabel}>{doneItems}/{totalItems}</span>
-            {doneItems > 0 && (
-              <button className={styles.clearBtn} onClick={clearAll}>Clear</button>
-            )}
+            {doneItems > 0 && <button className={styles.clearBtn} onClick={clearAll}>Reset run</button>}
           </div>
         </div>
         <div className={styles.progressBar}>
@@ -318,243 +357,177 @@ export function HaulPlan({ characters, prices, onRefresh }: Props) {
         </div>
       </div>
 
-      <div className={styles.groupList}>
+      {/* Stepper: one circle per alt = one login */}
+      <div className={styles.stepper}>
+        {steps.map((s, i) => {
+          const done = stepDone(s)
+          return (
+            <button
+              key={s.char.characterId}
+              className={`${styles.step} ${i === activeIdx ? styles.stepActive : ''} ${done ? styles.stepDone : ''}`}
+              onClick={() => setActive(i)}
+            >
+              <span className={styles.stepCircle}>
+                {s.char.characterId > 0 ? (
+                  <img
+                    src={`https://images.evetech.net/characters/${s.char.characterId}/portrait?size=64`}
+                    alt={s.char.characterName}
+                    onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
+                  />
+                ) : (
+                  <span className={styles.stepInitial}>{s.char.characterName[0]}</span>
+                )}
+                {done && <span className={styles.stepCheck}>✓</span>}
+              </span>
+              <span className={styles.stepName}>{s.char.characterName}</span>
+              <span className={styles.stepVerbs}>{s.verbs.join(' · ') || 'Nothing to do'}</span>
+            </button>
+          )
+        })}
+      </div>
 
-        {/* ── Stage 1: Reset & Collect ── */}
-        {charsWithExtractors.length > 0 && (
-          <div className={styles.stageColumn}>
-            <div className={styles.stageHeader}>
-              <span className={styles.stageNum}>1</span>
-              <span className={styles.stageTitle}>Reset &amp; Collect</span>
-              <span className={styles.stageDesc}>Visit extraction planets, reset heads, collect P1s</span>
-              <span className={styles.stageProgress}>{doneResets}/{totalResetItems}</span>
+      {/* Active alt — full screen */}
+      <div className={styles.stage}>
+        <div className={styles.altCard}>
+          <div className={styles.altHeader}>
+            {step.char.characterId > 0 && (
+              <img
+                src={`https://images.evetech.net/characters/${step.char.characterId}/portrait?size=64`}
+                className={styles.altPortrait}
+                alt={step.char.characterName}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            )}
+            <div className={styles.altHeaderText}>
+              <span className={styles.altStepNum}>Alt {activeIdx + 1} of {steps.length}</span>
+              <span className={styles.altName}>Log in as {step.char.characterName}</span>
+              <span className={styles.altPlan}>
+                {step.verbs.map(v => VERB_PHRASE[v] ?? v).join(' → ') || 'Nothing to do this login'}
+              </span>
             </div>
+          </div>
 
-            {charsWithExtractors.map(char => {
-              const extractors = char.planets
-                .filter(isExtractorPlanet)
-                .sort((a, b) => URGENCY_ORDER[getUrgency(a, now)] - URGENCY_ORDER[getUrgency(b, now)])
-
-              const charDone = extractors.every(p => resets.has(`reset|${p.planetId}`))
-              const worstChar: Urgency = extractors.reduce<Urgency>((w, p) => {
-                const u = getUrgency(p, now)
-                return URGENCY_ORDER[u] < URGENCY_ORDER[w] ? u : w
-              }, 'idle')
-
-              return (
-                <div key={char.characterId} className={`${styles.charBlock} ${charDone ? styles.charBlockDone : ''}`}>
-                  <div className={`${styles.charHeader} ${styles[`charHeader_${worstChar}`]}`}>
-                    {char.characterId > 0 && (
-                      <img
-                        src={`https://images.evetech.net/characters/${char.characterId}/portrait?size=32`}
-                        className={styles.charPortrait}
-                        alt={char.characterName}
-                        onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                      />
-                    )}
-                    <span className={styles.charName}>Log in as {char.characterName}</span>
-                    {feederIds.has(char.characterId) && (
-                      <span className={styles.feederBadge}>feeder</span>
-                    )}
-                    {doubleLoginIds.has(char.characterId) && (
-                      <span className={styles.doubleLoginBadge} title="Also has delivery stops in Stage 2">2 visits</span>
-                    )}
-                    <span className={styles.charCount}>
-                      {extractors.length} planet{extractors.length !== 1 ? 's' : ''}
+          {/* Reset & collect */}
+          {step.resets.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="reset" />Reset &amp; collect extractors</div>
+              {step.resets.map(r => {
+                const key = resetKey(r.planet)
+                const done = checked.has(key)
+                return (
+                  <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
+                    <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
+                    <div className={styles.taskBody}>
+                      <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[r.planet.type] }} title={r.planet.type} />
+                      <span className={styles.planetName}>{r.planet.name}</span>
+                      <div className={styles.chips}>
+                        {r.p1s.map(n => (
+                          <span key={n} className={styles.chip} style={{ '--tier-color': TIER_COLOR.P1 } as React.CSSProperties}>
+                            <span className={styles.chipTier}>P1</span>{n}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <span className={`${styles.timer} ${styles[`timer_${r.urgency}`]}`}>
+                      {r.planet.expiryTime ? formatTimeLeft(r.planet.expiryTime, now) : 'no timer'}
                     </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Deliver */}
+          {step.stops.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="deliver" />Deliver inputs to your factories</div>
+              {step.stops.map(stop => (
+                <div key={stop.planet.planetId} className={styles.stop}>
+                  <div className={styles.stopHeader}>
+                    <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[stop.planet.type] }} title={stop.planet.type} />
+                    <span className={styles.planetName}>{stop.planet.name}</span>
+                    <div className={styles.chips}>
+                      {stop.outputs.map(o => (
+                        <span key={o.name} className={styles.chip} style={{ '--tier-color': TIER_COLOR[o.tier] } as React.CSSProperties}>
+                          <span className={styles.chipTier}>{o.tier}</span>{o.name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-
-                  {extractors.map(planet => {
-                    const u = getUrgency(planet, now)
-                    const resetKey = `reset|${planet.planetId}`
-                    const isDone = resets.has(resetKey)
-                    const p1s = (planet.outputNames ?? []).filter((_, i) =>
-                      (planet.outputTiers ?? [])[i] === 'P1'
-                    )
-
+                  {stop.inputs.map(inp => {
+                    const key = deliverKey(stop.planet, inp.material)
+                    const done = checked.has(key)
                     return (
                       <label
-                        key={planet.planetId}
-                        className={`${styles.taskRow} ${styles.resetRow} ${isDone ? styles.taskDone : ''}`}
+                        key={inp.material}
+                        className={`${styles.taskRow} ${styles.inputRow} ${done ? styles.taskDone : ''} ${!inp.ready ? styles.waiting : ''}`}
                       >
-                        <input
-                          type="checkbox"
-                          className={styles.taskCheck}
-                          checked={isDone}
-                          onChange={() => toggleReset(resetKey)}
-                        />
+                        <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
                         <div className={styles.taskBody}>
-                          <div className={styles.taskMain}>
-                            <span
-                              className={styles.planetTypeDot}
-                              style={{ background: PLANET_COLOR[planet.type] }}
-                              title={planet.type}
-                            />
-                            <span className={styles.planetName}>{planet.name}</span>
-                            <span className={styles.taskFor}>reset · collect</span>
-                            <div className={styles.collectChips}>
-                              {p1s.map(n => (
-                                <span key={n} className={styles.collectChip}
-                                  style={{ '--tier-color': TIER_COLOR.P1 } as React.CSSProperties}>
-                                  <span className={styles.taskProductTier}>P1</span>{n}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                        <div className={styles.taskTimer}>
-                          {planet.expiryTime ? (
-                            <span className={`${styles.timerValue} ${styles[`timer_${u}`]}`}>
-                              {formatTimeLeft(planet.expiryTime, now)}
-                            </span>
+                          <span className={styles.chip} style={{ '--tier-color': TIER_COLOR[inp.tier] } as React.CSSProperties}>
+                            <span className={styles.chipTier}>{inp.tier}</span>{inp.material}
+                          </span>
+                          {inp.self ? (
+                            <span className={styles.sourceNote}>from your own extractor</span>
+                          ) : inp.ready ? (
+                            <span className={styles.sourceNote}>pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}</span>
                           ) : (
-                            <span className={`${styles.timerValue} ${styles.timer_idle}`}>no timer</span>
+                            <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
                           )}
                         </div>
                       </label>
                     )
                   })}
                 </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* ── Stage 2: Deliver ── */}
-        {tasks.length > 0 && (
-          <div className={styles.stageColumn}>
-            <div className={styles.stageHeader}>
-              <span className={styles.stageNum}>2</span>
-              <span className={styles.stageTitle}>Deliver</span>
-              <span className={styles.stageDesc}>Move collected P1s to factory planets</span>
-              <span className={styles.stageProgress}>{doneDeliveries}/{tasks.length}</span>
+              ))}
             </div>
+          )}
 
-            {deliverChars.map(({ char, byPlanet }) => {
-              const allTasks = Array.from(byPlanet.values()).flat()
-              const charDone = allTasks.every(t => checked.has(t.key))
-              const worstChar: Urgency = allTasks.reduce<Urgency>((w, t) =>
-                URGENCY_ORDER[t.urgency] < URGENCY_ORDER[w] ? t.urgency : w, 'idle')
+          {/* Deposit into shared container */}
+          {step.deposits.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="input" />Drop into shared PI container</div>
+              {step.deposits.map(d => {
+                const key = depositKey(step.char.characterId, d.material)
+                const done = checked.has(key)
+                return (
+                  <label key={d.material} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
+                    <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
+                    <div className={styles.taskBody}>
+                      <span className={styles.chip} style={{ '--tier-color': TIER_COLOR[d.tier] } as React.CSSProperties}>
+                        <span className={styles.chipTier}>{d.tier}</span>{d.material}
+                      </span>
+                      <span className={styles.sourceNote}>for {d.toNames.join(', ')}</span>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+          )}
 
-              const sortedPlanets = Array.from(byPlanet.values()).sort((a, b) => {
-                const wA = Math.min(...a.map(t => URGENCY_ORDER[t.urgency]))
-                const wB = Math.min(...b.map(t => URGENCY_ORDER[t.urgency]))
-                return wA - wB
-              })
+          {step.taskKeys.length === 0 && (
+            <div className={styles.nothing}>Nothing to do on this alt right now.</div>
+          )}
+        </div>
 
-              const productStops = new Map<string, string[]>()
-              for (const planetTasks of byPlanet.values()) {
-                for (const t of planetTasks) {
-                  if (!productStops.has(t.inputName)) productStops.set(t.inputName, [])
-                  productStops.get(t.inputName)!.push(t.toPlanet.name)
-                }
-              }
-
-              return (
-                <div key={char.characterId} className={`${styles.charBlock} ${charDone ? styles.charBlockDone : ''}`}>
-                  <div className={`${styles.charHeader} ${styles[`charHeader_${worstChar}`]}`}>
-                    {char.characterId > 0 && (
-                      <img
-                        src={`https://images.evetech.net/characters/${char.characterId}/portrait?size=32`}
-                        className={styles.charPortrait}
-                        alt={char.characterName}
-                        onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                      />
-                    )}
-                    <span className={styles.charName}>Log in as {char.characterName}</span>
-                    {doubleLoginIds.has(char.characterId) && (
-                      <span className={styles.doubleLoginBadge} title="Also has extraction resets in Stage 1">2 visits</span>
-                    )}
-                    <span className={styles.charCount}>
-                      {allTasks.length} haul{allTasks.length !== 1 ? 's' : ''} · {byPlanet.size} stop{byPlanet.size !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-
-                  {sortedPlanets.map(planetTasks => {
-                    const sample = planetTasks[0]
-                    const worstPlanet: Urgency = planetTasks.reduce<Urgency>((w, t) =>
-                      URGENCY_ORDER[t.urgency] < URGENCY_ORDER[w] ? t.urgency : w, 'idle')
-                    const sorted = [...planetTasks].sort((a, b) => URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency])
-
-                    return (
-                      <div key={sample.toPlanet.planetId} className={styles.planetStop}>
-                        <div className={`${styles.planetHeader} ${styles[`planetHeader_${worstPlanet}`]}`}>
-                          <span className={`${styles.destDot} ${styles[`dot_${worstPlanet}`]}`} />
-                          <span className={styles.stopLabel}>Stop</span>
-                          <span className={styles.planetName}>{sample.toPlanet.name}</span>
-                          <span
-                            className={styles.planetTypeDot}
-                            style={{ background: PLANET_COLOR[sample.toPlanet.type] }}
-                            title={sample.toPlanet.type}
-                          />
-                          <div className={styles.destOutputs}>
-                            {sample.outputNames.map((n, i) => {
-                              const tier = sample.toPlanet.outputTiers?.[i] ?? 'P2'
-                              return (
-                                <span key={n} className={styles.destOutputChip}
-                                  style={{ '--tier-color': TIER_COLOR[tier] } as React.CSSProperties}>
-                                  <span className={styles.destOutputTier}>{tier}</span>{n}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </div>
-
-                        {sorted.map(t => {
-                          const allStops = productStops.get(t.inputName) ?? []
-                          const otherStops = allStops.filter(p => p !== t.toPlanet.name)
-                          return (
-                            <label
-                              key={t.key}
-                              className={`${styles.taskRow} ${checked.has(t.key) ? styles.taskDone : ''}`}
-                            >
-                              <input
-                                type="checkbox"
-                                className={styles.taskCheck}
-                                checked={checked.has(t.key)}
-                                onChange={() => toggle(t.key)}
-                              />
-                              <div className={styles.taskBody}>
-                                <div className={styles.taskMain}>
-                                  <span
-                                    className={styles.taskProduct}
-                                    style={{ '--tier-color': TIER_COLOR[t.inputTier] } as React.CSSProperties}
-                                  >
-                                    <span className={styles.taskProductTier}>{t.inputTier}</span>
-                                    {t.inputName}
-                                  </span>
-                                  <span className={styles.taskFor}>for {t.outputNames.join(', ')}</span>
-                                </div>
-                                {otherStops.length > 0 && (
-                                  <div className={styles.splitWarning}>
-                                    ÷{allStops.length} — take 1/{allStops.length} here, rest to {otherStops.join(', ')}
-                                  </div>
-                                )}
-                              </div>
-                              <div className={styles.taskTimer}>
-                                {t.toPlanet.expiryTime ? (
-                                  <span className={`${styles.timerValue} ${styles[`timer_${t.urgency}`]}`}>
-                                    {formatTimeLeft(t.toPlanet.expiryTime, now)}
-                                  </span>
-                                ) : (
-                                  <span className={`${styles.timerValue} ${styles.timer_idle}`}>no timer</span>
-                                )}
-                              </div>
-                            </label>
-                          )
-                        })}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {charsWithExtractors.length === 0 && tasks.length === 0 && (
-          <div className={styles.emptyInner}>All factory inputs are produced within the same character and system.</div>
-        )}
+        {/* Nav */}
+        <div className={styles.nav}>
+          <button className={styles.navBtn} disabled={activeIdx === 0} onClick={() => setActive(i => Math.max(0, i - 1))}>
+            ← Prev
+          </button>
+          <span className={styles.navHint}>
+            {stepDone(step) ? 'All done on this alt' : `${step.taskKeys.filter(k => checked.has(k)).length}/${step.taskKeys.length} done`}
+          </span>
+          {activeIdx < steps.length - 1 ? (
+            <button className={styles.navPrimary} onClick={() => completeAndNext(step)}>
+              Complete &amp; next →
+            </button>
+          ) : (
+            <button className={styles.navPrimary} onClick={() => completeAndNext(step)}>
+              Finish run ✓
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
