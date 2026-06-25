@@ -10,6 +10,7 @@ import type { StoredCharacter, PISkillLevels } from './types/api'
 import styles from './App.module.css'
 import { APP_VERSION, LATEST_CHANGE } from './version'
 import { useMarketPrices } from './hooks/useMarketPrices'
+import { useExtractorNotifications, countExpiredExtractors } from './hooks/useExtractorNotifications'
 
 type Tab = 'setup' | 'chain' | 'haul'
 
@@ -53,6 +54,19 @@ export default function App() {
   const noElectron = typeof window.api === 'undefined'
 
   const { prices, lastUpdated, nextUpdateAt } = useMarketPrices()
+
+  const notify = useExtractorNotifications(characters)
+  const expiredCount = countExpiredExtractors(characters)
+
+  const onToggleNotify = async () => {
+    if (notify.enabled) { notify.disable(); return }
+    const perm = await notify.enable()
+    if (perm === 'denied') {
+      alert(
+        'Notifications are blocked for this site. Enable them in your browser’s site settings (the icon left of the address bar), then try again.'
+      )
+    }
+  }
 
   // Price refresh ring: 0 = just updated, 1 = due for refresh
   const [priceProgress, setPriceProgress] = useState(0)
@@ -125,9 +139,27 @@ export default function App() {
             Haul Plan
           </button>
         </div>
-        <button className={styles.feedbackBtn} onClick={() => setFeedbackOpen(true)}>
-          💬 Feedback
-        </button>
+        <div className={styles.tabBarRight}>
+          {notify.supported && (
+            <button
+              className={`${styles.notifyBtn} ${notify.enabled ? styles.notifyOn : ''}`}
+              onClick={onToggleNotify}
+              title={
+                notify.enabled
+                  ? 'Extractor-reset notifications are ON. You’ll get a system notification (at most once an hour, while the app is open) when extractors need reset. Click to turn off.'
+                  : 'Turn on extractor-reset notifications — a system alert when 1+ extractors need reset (at most once an hour, while the app is open).'
+              }
+            >
+              {notify.enabled ? '🔔' : '🔕'}
+              {notify.enabled && expiredCount > 0 && (
+                <span className={styles.notifyBadge}>{expiredCount}</span>
+              )}
+            </button>
+          )}
+          <button className={styles.feedbackBtn} onClick={() => setFeedbackOpen(true)}>
+            💬 Feedback
+          </button>
+        </div>
       </div>
 
       {noElectron && (

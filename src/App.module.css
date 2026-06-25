@@ -58,8 +58,15 @@
   border-bottom-color: var(--accent);
 }
 
-.feedbackBtn {
+.tabBarRight {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.feedbackBtn {
   flex-shrink: 0;
   padding: 5px 12px;
   font-size: 12px;
@@ -72,6 +79,39 @@
   transition: color 0.12s, border-color 0.12s;
 }
 .feedbackBtn:hover { color: var(--text-primary); border-color: var(--accent); }
+
+.notifyBtn {
+  position: relative;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.notifyBtn:hover { border-color: var(--accent); }
+.notifyOn { border-color: var(--accent); }
+
+.notifyBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--danger, #d9534f);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+}
 
 /* ── Mobile: keep the tab bar usable on narrow screens ── */
 @media (max-width: 640px) {
