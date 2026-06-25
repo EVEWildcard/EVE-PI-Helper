@@ -4,6 +4,7 @@ import { SetupView } from './components/SetupView/SetupView'
 import { ChainView } from './components/ChainView/ChainView'
 import { HaulPlan } from './components/HaulPlan/HaulPlan'
 import { SkillEditor } from './components/SkillEditor/SkillEditor'
+import { FeedbackModal } from './components/Feedback/FeedbackModal'
 import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary'
 import type { StoredCharacter, PISkillLevels } from './types/api'
 import styles from './App.module.css'
@@ -47,6 +48,7 @@ export default function App() {
 
   const [tab, setTab] = useState<Tab>('setup')
   const [skillEditChar, setSkillEditChar] = useState<StoredCharacter | null>(null)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   const noElectron = typeof window.api === 'undefined'
 
@@ -123,6 +125,9 @@ export default function App() {
             Haul Plan
           </button>
         </div>
+        <button className={styles.feedbackBtn} onClick={() => setFeedbackOpen(true)}>
+          💬 Feedback
+        </button>
       </div>
 
       {noElectron && (
@@ -190,6 +195,14 @@ export default function App() {
             updateCharacterSkills(skillEditChar.characterId, skills)
             setSkillEditChar(null)
           }}
+        />
+      )}
+
+      {feedbackOpen && (
+        <FeedbackModal
+          screen={tab === 'setup' ? 'Setup' : tab === 'chain' ? 'Production Chain' : 'Haul Plan'}
+          characterCount={characters.length}
+          onClose={() => setFeedbackOpen(false)}
         />
       )}
     </div>

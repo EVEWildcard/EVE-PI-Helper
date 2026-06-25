@@ -58,6 +58,21 @@
   border-bottom-color: var(--accent);
 }
 
+.feedbackBtn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.feedbackBtn:hover { color: var(--text-primary); border-color: var(--accent); }
+
 /* ── Content area ── */
 
 .content {
