@@ -389,7 +389,7 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [])
   const [showSuggestions, setShowSuggestions] = useState(
-    () => localStorage.getItem('chainView.suggestions') !== 'false'
+    () => localStorage.getItem('chainView.suggestions') === 'true'
   )
   const [assumeMaxSkills, setAssumeMaxSkills] = useState(false)
   const [selectedSuggestion, setSelectedSuggestion] = useState<ChainSuggestion | null>(null)
