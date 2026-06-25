@@ -10,7 +10,7 @@ import type { StoredCharacter, PISkillLevels } from './types/api'
 import styles from './App.module.css'
 import { APP_VERSION, LATEST_CHANGE } from './version'
 import { useMarketPrices } from './hooks/useMarketPrices'
-import { useExtractorNotifications, countExpiredExtractors } from './hooks/useExtractorNotifications'
+import { useExtractorNotifications } from './hooks/useExtractorNotifications'
 
 type Tab = 'setup' | 'chain' | 'haul'
 
@@ -57,7 +57,7 @@ export default function App() {
   const { prices, lastUpdated, nextUpdateAt } = useMarketPrices()
 
   const notify = useExtractorNotifications(characters)
-  const expiredCount = countExpiredExtractors(characters)
+  const expiredCount = notify.pendingCount
 
   const onToggleNotify = async () => {
     if (notify.enabled) { notify.disable(); return }
@@ -69,11 +69,14 @@ export default function App() {
     }
   }
 
-  // Attention pill → jump to the Haul plan and focus the first alt that needs a reset.
+  // Attention pill → jump to the Haul plan, focus + highlight the first alt that
+  // needs a reset, and acknowledge so the pill/notification clears until a new
+  // extractor expires.
   const onAttentionClick = () => {
     if (characters.length === 0) return
     setTab('haul')
     setHaulFocusNonce(n => n + 1)
+    notify.acknowledge()
   }
 
   // Price refresh ring: 0 = just updated, 1 = due for refresh
@@ -231,13 +234,13 @@ export default function App() {
           </>
         )}
         <a
-          className={styles.statusCoffee}
-          href="https://buymeacoffee.com/lucianodonati"
+          className={styles.statusKofi}
+          href="https://ko-fi.com/Q5P7222HHS"
           target="_blank"
           rel="noopener noreferrer"
-          title="Support EVE PI Helper — buy me a coffee ☕"
+          title="Support EVE PI Helper on Ko-fi ☕"
         >
-          ☕ Buy me a coffee
+          ☕ Support me on Ko-fi
         </a>
         <span className={styles.statusSpacer} />
         <span className={styles.statusChange}>{LATEST_CHANGE}</span>

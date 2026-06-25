@@ -300,11 +300,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   useEffect(() => { localStorage.setItem(STORAGE_KEY_STEP, String(activeIdx)) }, [activeIdx])
 
   // When the top-bar attention pill is clicked, jump to the first alt that has
-  // an expired extractor so the user lands directly on what needs doing.
+  // an expired extractor and briefly pulse its reset rows so the eye lands on
+  // exactly what needs doing.
+  const [pulsing, setPulsing] = useState(false)
   useEffect(() => {
     if (!focusNonce) return
     const idx = steps.findIndex(s => s.resets.some(r => r.urgency === 'expired'))
     if (idx >= 0) setActive(idx)
+    setPulsing(true)
+    const t = setTimeout(() => setPulsing(false), 2400)
+    return () => clearTimeout(t)
   }, [focusNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(key: string) {
@@ -425,7 +430,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                 const key = resetKey(r.planet)
                 const done = checked.has(key)
                 return (
-                  <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
+                  <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''} ${pulsing && r.urgency === 'expired' && !done ? styles.taskPulse : ''}`}>
                     <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
                     <div className={styles.taskBody}>
                       <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[r.planet.type] }} title={r.planet.type} />
