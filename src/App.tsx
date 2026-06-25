@@ -182,6 +182,15 @@ export default function App() {
             <span className={styles.statusSep}>|</span>
           </>
         )}
+        <a
+          className={styles.statusCoffee}
+          href="https://buymeacoffee.com/lucianodonati"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Support EVE PI Helper — buy me a coffee ☕"
+        >
+          ☕ Buy me a coffee
+        </a>
         <span className={styles.statusSpacer} />
         <span className={styles.statusChange}>{LATEST_CHANGE}</span>
         <span className={styles.statusVersion}>v{APP_VERSION}</span>
