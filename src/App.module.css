@@ -81,37 +81,49 @@
 .feedbackBtn:hover { color: var(--text-primary); border-color: var(--accent); }
 
 .notifyBtn {
-  position: relative;
   flex-shrink: 0;
   padding: 5px 10px;
   font-size: 13px;
   line-height: 1;
-  color: var(--text-secondary);
   background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: border-color 0.12s, opacity 0.12s, filter 0.12s;
 }
 .notifyBtn:hover { border-color: var(--accent); }
-.notifyOn { border-color: var(--accent); }
 
-.notifyBadge {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  box-sizing: border-box;
-  border-radius: 8px;
-  background: var(--danger, #d9534f);
-  color: #fff;
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 15px;
-  text-align: center;
+/* On = lit bell, accent border. Off = greyscale + dimmed so it clearly reads
+   as disabled (the emoji is desaturated rather than swapped for colour). */
+.notifyOn { border-color: var(--accent); }
+.notifyOff {
+  filter: grayscale(1);
+  opacity: 0.55;
 }
+.notifyOff:hover { opacity: 0.85; }
+
+/* Attention pill — appears whenever extractors need reset (independent of the
+   notification toggle). Clicking jumps to the Haul plan. */
+.attentionPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--danger);
+  background: rgba(224, 64, 64, 0.12);
+  border: 1px solid rgba(224, 64, 64, 0.45);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.attentionPill:hover {
+  background: rgba(224, 64, 64, 0.22);
+  border-color: var(--danger);
+}
+.attentionIcon { font-size: 11px; line-height: 1; }
 
 /* ── Mobile: keep the tab bar usable on narrow screens ── */
 @media (max-width: 640px) {

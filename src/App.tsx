@@ -50,6 +50,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('setup')
   const [skillEditChar, setSkillEditChar] = useState<StoredCharacter | null>(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [haulFocusNonce, setHaulFocusNonce] = useState(0)
 
   const noElectron = typeof window.api === 'undefined'
 
@@ -66,6 +67,13 @@ export default function App() {
         'Notifications are blocked for this site. Enable them in your browser’s site settings (the icon left of the address bar), then try again.'
       )
     }
+  }
+
+  // Attention pill → jump to the Haul plan and focus the first alt that needs a reset.
+  const onAttentionClick = () => {
+    if (characters.length === 0) return
+    setTab('haul')
+    setHaulFocusNonce(n => n + 1)
   }
 
   // Price refresh ring: 0 = just updated, 1 = due for refresh
@@ -142,18 +150,26 @@ export default function App() {
         <div className={styles.tabBarRight}>
           {notify.supported && (
             <button
-              className={`${styles.notifyBtn} ${notify.enabled ? styles.notifyOn : ''}`}
+              className={`${styles.notifyBtn} ${notify.enabled ? styles.notifyOn : styles.notifyOff}`}
               onClick={onToggleNotify}
+              aria-pressed={notify.enabled}
               title={
                 notify.enabled
                   ? 'Extractor-reset notifications are ON. You’ll get a system notification (at most once an hour, while the app is open) when extractors need reset. Click to turn off.'
-                  : 'Turn on extractor-reset notifications — a system alert when 1+ extractors need reset (at most once an hour, while the app is open).'
+                  : 'Extractor-reset notifications are OFF. Click to turn them on — a system alert when 1+ extractors need reset (at most once an hour, while the app is open).'
               }
             >
               {notify.enabled ? '🔔' : '🔕'}
-              {notify.enabled && expiredCount > 0 && (
-                <span className={styles.notifyBadge}>{expiredCount}</span>
-              )}
+            </button>
+          )}
+          {expiredCount > 0 && (
+            <button
+              className={styles.attentionPill}
+              onClick={onAttentionClick}
+              title={`${expiredCount} extractor${expiredCount !== 1 ? 's' : ''} need reset — open the Haul plan`}
+            >
+              <span className={styles.attentionIcon}>⚠</span>
+              {expiredCount}
             </button>
           )}
           <button className={styles.feedbackBtn} onClick={() => setFeedbackOpen(true)}>
@@ -190,7 +206,7 @@ export default function App() {
             <ChainView characters={characters} prices={prices} onRefresh={reloadCharacters} />
           )}
           {tab === 'haul' && (
-            <HaulPlan characters={characters} prices={prices} onRefresh={reloadCharacters} />
+            <HaulPlan characters={characters} prices={prices} onRefresh={reloadCharacters} focusNonce={haulFocusNonce} />
           )}
         </ErrorBoundary>
       </div>

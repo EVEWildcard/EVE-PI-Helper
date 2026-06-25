@@ -270,9 +270,11 @@ interface Props {
   characters: StoredCharacter[]
   prices: Record<number, number>
   onRefresh?: () => Promise<void>
+  /** Bumped by the top-bar attention pill to jump to the first alt needing a reset. */
+  focusNonce?: number
 }
 
-export function HaulPlan({ characters, onRefresh }: Props) {
+export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000)
@@ -296,6 +298,14 @@ export function HaulPlan({ characters, onRefresh }: Props) {
 
   const activeIdx = Math.min(active, Math.max(0, steps.length - 1))
   useEffect(() => { localStorage.setItem(STORAGE_KEY_STEP, String(activeIdx)) }, [activeIdx])
+
+  // When the top-bar attention pill is clicked, jump to the first alt that has
+  // an expired extractor so the user lands directly on what needs doing.
+  useEffect(() => {
+    if (!focusNonce) return
+    const idx = steps.findIndex(s => s.resets.some(r => r.urgency === 'expired'))
+    if (idx >= 0) setActive(idx)
+  }, [focusNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(key: string) {
     setChecked(prev => {
