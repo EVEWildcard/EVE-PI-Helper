@@ -1,3 +1,3 @@
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.1.0'
 
-export const LATEST_CHANGE = 'v1.0 — chain graph, suggestions, template search, character color coding'
+export const LATEST_CHANGE = 'v1.1 — guided Haul Plan, in-app feedback, mobile-friendly chain'
