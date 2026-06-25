@@ -76,6 +76,7 @@ const ROW_GAP = 16
 const PAD_X   = 32
 const PAD_Y   = 48
 const NODE_H_EST = 90  // rough estimate for first layout pass
+const NARROW_BREAKPOINT = 640  // below this, fit-height + horizontal pan instead of shrink-to-fit
 
 // ── graph builder ─────────────────────────────────────────────────────────────
 
@@ -605,19 +606,23 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
   const totalW = PAD_X * 2 + vTotalInnerW
   const totalH = svgSize.h || (vEstColY(0) + NODE_H_EST + PAD_Y * 2)
 
-  // Scale to fit both width and height so nothing is clipped
+  // On a wide screen we scale the whole graph to fit. On a narrow/portrait
+  // screen that would make it microscopic, so instead fit the HEIGHT (tiers
+  // stay readable) and let the user pan horizontally (Phase 1 mobile support).
+  const isNarrow = containerW > 0 && containerW < NARROW_BREAKPOINT
   const scaleW = containerW > 0 && totalW > 0 ? containerW / totalW : 1.0
   const scaleH = containerH > 0 && totalH > 0 ? containerH / totalH : 1.0
-  const scale = Math.min(scaleW, scaleH)
+  const scale = isNarrow ? Math.min(scaleH, 1) : Math.min(scaleW, scaleH)
 
   // Pass 1: measure actual node sizes → compute real positions
   useLayoutEffect(() => {
     if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setArrows([]); return }
 
     // getBoundingClientRect returns screen pixels (post-scale); divide by scale to get CSS pixels
+    const currentNarrow = containerW > 0 && containerW < NARROW_BREAKPOINT
     const currentScaleW = containerW > 0 && totalW > 0 ? containerW / totalW : 1.0
     const currentScaleH = containerH > 0 && totalH > 0 ? containerH / totalH : 1.0
-    const currentScale = Math.min(currentScaleW, currentScaleH)
+    const currentScale = currentNarrow ? Math.min(currentScaleH, 1) : Math.min(currentScaleW, currentScaleH)
 
     const bandH = new Map<number, number>()
     const sizes = new Map<string, { w: number; h: number }>()
@@ -807,7 +812,12 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
         })()}
       </div>
 
-      <div className={styles.canvas} ref={canvasRef}>
+      <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>
+        {isNarrow && (
+          <div className={styles.mobileHint}>
+            Drag to pan · the production chain is best viewed on a wider screen
+          </div>
+        )}
         {/* Tier band labels — outside canvasInner, pinned to canvas left, Y converted to visual coords */}
         {activeCols.slice().reverse().map(i => {
           const pos = nodePos.get(nodes.find(n => n.column === i)?.key ?? '')
@@ -886,8 +896,9 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
           )
         })}
         </div>
-        {/* Character color legend */}
-        {characters.length > 0 && (
+        {/* Character color legend — hidden on narrow screens where it overlaps
+            the graph; node borders still carry each character's color. */}
+        {characters.length > 0 && !isNarrow && (
           <div className={styles.legend}>
             {characters.slice().sort((a, b) =>
               (b.piSkills.interplanetaryConsolidation - a.piSkills.interplanetaryConsolidation) ||

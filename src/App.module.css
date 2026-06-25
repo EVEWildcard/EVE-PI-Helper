@@ -73,6 +73,19 @@
 }
 .feedbackBtn:hover { color: var(--text-primary); border-color: var(--accent); }
 
+/* ── Mobile: keep the tab bar usable on narrow screens ── */
+@media (max-width: 640px) {
+  .tabBar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabBar::-webkit-scrollbar { display: none; }
+  .appName { margin-right: 10px; }
+  .tab { padding: 11px 11px; }
+  .tabs { flex-shrink: 0; }
+  .feedbackBtn { flex-shrink: 0; }
+}
+
 /* ── Content area ── */
 
 .content {
