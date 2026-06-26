@@ -102,21 +102,28 @@
 
 /* Return visit — same alt, second appearance. */
 .stepReturn .stepCircle { border-style: dashed; }
+
+/* Wrapper is NOT clipped, so the return badge can sit on the circle's edge
+   without being cropped by the circle's overflow:hidden. */
+.stepCircleWrap { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
+
 .stepReturnBadge {
   position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 16px;
-  height: 16px;
+  top: -4px;
+  left: -4px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--accent);
+  border: 2px solid var(--bg-deep);
   color: #fff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  z-index: 2;
 }
 .stepReturnTag { color: var(--text-muted); font-weight: 600; }
 
@@ -223,15 +230,31 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-  padding-bottom: 8px;
+  padding: 0 0 8px;
   margin-bottom: 4px;
+  border: none;
   border-bottom: 1px solid var(--border);
+  background: none;
+  text-align: left;
+  cursor: pointer;
 }
+.sectionTitle[data-collapsible]:hover { color: var(--text-secondary); }
+.sectionLabel { flex-shrink: 0; }
+.sectionCount {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.sectionChevron { font-size: 9px; color: var(--text-muted); flex-shrink: 0; }
 
 .sectionDot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .sectionDot[data-kind="reset"]   { background: #4a90c8; }

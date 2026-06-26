@@ -334,6 +334,22 @@ const VERB_PHRASE: Record<string, string> = {
   Pickup: 'Pick up from container', Deliver: 'Deliver',
 }
 
+// Clickable section header. Completed rows in the section are hidden by default to
+// keep the list tidy as you work; clicking the header reveals them again.
+function SectionHeader({ kind, label, done, total, expanded, onToggle }: {
+  kind: string; label: string; done: number; total: number; expanded: boolean; onToggle: () => void
+}) {
+  const hasDone = done > 0
+  return (
+    <button type="button" className={styles.sectionTitle} onClick={onToggle} data-collapsible={hasDone ? '' : undefined}>
+      <span className={styles.sectionDot} data-kind={kind} />
+      <span className={styles.sectionLabel}>{label}</span>
+      {hasDone && <span className={styles.sectionCount}>{done === total ? 'all done' : `${done}/${total} done`}</span>}
+      {hasDone && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
+    </button>
+  )
+}
+
 // ── persistence ──────────────────────────────────────────────────────────────
 
 const STORAGE_KEY_CHECKED = 'haulplan.checked'
@@ -410,6 +426,13 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   // player can expand it again. Reset the expand toggle whenever the alt changes.
   const [expandDone, setExpandDone] = useState(false)
   useEffect(() => { setExpandDone(false) }, [activeIdx])
+
+  // Per-section reveal of completed rows (collapsed by default). Reset on alt change.
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  useEffect(() => { setExpandedSections(new Set()) }, [activeIdx])
+  const toggleSection = (id: string) => setExpandedSections(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
 
   // When the top-bar attention pill is clicked, jump to the first alt that has
   // an expired extractor and briefly pulse its reset rows so the eye lands on
@@ -519,18 +542,21 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                 className={`${styles.step} ${i === activeIdx ? styles.stepActive : ''} ${done ? styles.stepDone : ''} ${s.isReturn ? styles.stepReturn : ''}`}
                 onClick={() => setActive(i)}
               >
-                <span className={styles.stepCircle}>
-                  {s.char.characterId > 0 ? (
-                    <img
-                      src={`https://images.evetech.net/characters/${s.char.characterId}/portrait?size=64`}
-                      alt={s.char.characterName}
-                      onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
-                    />
-                  ) : (
-                    <span className={styles.stepInitial}>{s.char.characterName[0]}</span>
-                  )}
-                  {s.isReturn && <span className={styles.stepReturnBadge} title="Return visit">↩</span>}
-                  {done && <span className={styles.stepCheck}>✓</span>}
+                <span className={styles.stepCircleWrap}>
+                  <span className={styles.stepCircle}>
+                    {s.char.characterId > 0 ? (
+                      <img
+                        src={`https://images.evetech.net/characters/${s.char.characterId}/portrait?size=64`}
+                        alt={s.char.characterName}
+                        onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
+                      />
+                    ) : (
+                      <span className={styles.stepInitial}>{s.char.characterName[0]}</span>
+                    )}
+                    {done && <span className={styles.stepCheck}>✓</span>}
+                  </span>
+                  {/* Badge sits OUTSIDE the clipped circle so it isn't cropped. */}
+                  {s.isReturn && <span className={styles.stepReturnBadge} title="Return visit — come back to finish deliveries that were waiting on a later alt">↩</span>}
                 </span>
                 <span className={styles.stepName}>
                   {s.char.characterName}{s.isReturn && <span className={styles.stepReturnTag}> · return</span>}
@@ -591,14 +617,19 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
           )}
 
           {/* Reset & collect */}
-          {step.resets.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="reset" />Reset &amp; collect extractors</div>
-              {step.resets.map(r => {
-                const key = resetKey(r.planet)
-                const verified = verifiedResetKeys.has(key)
-                const done = verified || checked.has(key)
-                return (
+          {step.resets.length > 0 && (() => {
+            const rows = step.resets.map(r => {
+              const key = resetKey(r.planet)
+              const verified = verifiedResetKeys.has(key)
+              return { r, key, verified, done: verified || checked.has(key) }
+            })
+            const doneCount = rows.filter(x => x.done).length
+            const expanded = expandedSections.has('reset')
+            const visible = expanded ? rows : rows.filter(x => !x.done)
+            return (
+              <div className={styles.section}>
+                <SectionHeader kind="reset" label="Reset & collect extractors" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('reset')} />
+                {visible.map(({ r, key, verified, done }) => (
                   <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''} ${pulsing && r.urgency === 'expired' && !done ? styles.taskPulse : ''}`}>
                     {verified ? (
                       <span className={styles.verifiedCheck} title="Verified via ESI — this extractor is running again">✓✓</span>
@@ -620,65 +651,76 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       {r.planet.expiryTime ? formatTimeLeft(r.planet.expiryTime, now) : 'no timer'}
                     </span>
                   </label>
-                )
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )
+          })()}
 
           {/* Deliver */}
-          {step.stops.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="deliver" />Deliver inputs to your factories</div>
-              {step.stops.map(stop => (
-                <div key={stop.planet.planetId} className={styles.stop}>
-                  <div className={styles.stopHeader}>
-                    <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[stop.planet.type] }} title={stop.planet.type} />
-                    <span className={styles.planetName}>{stop.planet.name}</span>
-                    <div className={styles.chips}>
-                      {stop.outputs.map(o => (
-                        <span key={o.name} className={styles.chip} style={{ '--tier-color': TIER_COLOR[o.tier] } as React.CSSProperties}>
-                          <span className={styles.chipTier}>{o.tier}</span>{o.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  {stop.inputs.map(inp => {
-                    const key = deliverKey(stop.planet, inp.material)
-                    const done = isDone(key)
-                    return (
-                      <label
-                        key={inp.material}
-                        className={`${styles.taskRow} ${styles.inputRow} ${done ? styles.taskDone : ''} ${!inp.ready ? styles.waiting : ''}`}
-                      >
-                        <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
-                        <div className={styles.taskBody}>
-                          <span className={styles.chip} style={{ '--tier-color': TIER_COLOR[inp.tier] } as React.CSSProperties}>
-                            <span className={styles.chipTier}>{inp.tier}</span>{inp.material}
-                          </span>
-                          {inp.self ? (
-                            <span className={styles.sourceNote}>from your own extractor</span>
-                          ) : inp.ready ? (
-                            <span className={styles.sourceNote}>pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}</span>
-                          ) : (
-                            <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
-                          )}
+          {step.stops.length > 0 && (() => {
+            const expanded = expandedSections.has('deliver')
+            let doneCount = 0, total = 0
+            for (const s of step.stops) for (const i of s.inputs) { total++; if (isDone(deliverKey(s.planet, i.material))) doneCount++ }
+            return (
+              <div className={styles.section}>
+                <SectionHeader kind="deliver" label="Deliver inputs to your factories" done={doneCount} total={total} expanded={expanded} onToggle={() => toggleSection('deliver')} />
+                {step.stops.map(stop => {
+                  const inputs = expanded ? stop.inputs : stop.inputs.filter(i => !isDone(deliverKey(stop.planet, i.material)))
+                  if (inputs.length === 0) return null
+                  return (
+                    <div key={stop.planet.planetId} className={styles.stop}>
+                      <div className={styles.stopHeader}>
+                        <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[stop.planet.type] }} title={stop.planet.type} />
+                        <span className={styles.planetName}>{stop.planet.name}</span>
+                        <div className={styles.chips}>
+                          {stop.outputs.map(o => (
+                            <span key={o.name} className={styles.chip} style={{ '--tier-color': TIER_COLOR[o.tier] } as React.CSSProperties}>
+                              <span className={styles.chipTier}>{o.tier}</span>{o.name}
+                            </span>
+                          ))}
                         </div>
-                      </label>
-                    )
-                  })}
-                </div>
-              ))}
-            </div>
-          )}
+                      </div>
+                      {inputs.map(inp => {
+                        const key = deliverKey(stop.planet, inp.material)
+                        const done = isDone(key)
+                        return (
+                          <label
+                            key={inp.material}
+                            className={`${styles.taskRow} ${styles.inputRow} ${done ? styles.taskDone : ''} ${!inp.ready ? styles.waiting : ''}`}
+                          >
+                            <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
+                            <div className={styles.taskBody}>
+                              <span className={styles.chip} style={{ '--tier-color': TIER_COLOR[inp.tier] } as React.CSSProperties}>
+                                <span className={styles.chipTier}>{inp.tier}</span>{inp.material}
+                              </span>
+                              {inp.self ? (
+                                <span className={styles.sourceNote}>from your own extractor</span>
+                              ) : inp.ready ? (
+                                <span className={styles.sourceNote}>pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}</span>
+                              ) : (
+                                <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {/* Deposit into shared container */}
-          {step.deposits.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="input" />Drop into shared PI container</div>
-              {step.deposits.map(d => {
-                const key = depositKey(step.char.characterId, d.material)
-                const done = isDone(key)
-                return (
+          {step.deposits.length > 0 && (() => {
+            const rows = step.deposits.map(d => ({ d, key: depositKey(step.char.characterId, d.material), done: isDone(depositKey(step.char.characterId, d.material)) }))
+            const doneCount = rows.filter(x => x.done).length
+            const expanded = expandedSections.has('deposit')
+            const visible = expanded ? rows : rows.filter(x => !x.done)
+            return (
+              <div className={styles.section}>
+                <SectionHeader kind="input" label="Drop into shared PI container" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('deposit')} />
+                {visible.map(({ d, key, done }) => (
                   <label key={d.material} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
                     <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
                     <div className={styles.taskBody}>
@@ -688,10 +730,10 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       <span className={styles.sourceNote}>for {d.toNames.join(', ')}</span>
                     </div>
                   </label>
-                )
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )
+          })()}
 
           {step.taskKeys.length === 0 && (
             <div className={styles.nothing}>Nothing to do on this alt right now.</div>
