@@ -1,8 +1,40 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import type { StoredCharacter, Planet } from '../../types/api'
-import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
+import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME, ALL_SCHEMATICS, PRODUCT_BY_TYPE_ID } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import styles from './HaulPlan.module.css'
+
+// output name → its inputs with per-cycle quantities (all factory cycles are 1h,
+// so quantity is proportional to hourly demand). Used to split a deposit between
+// multiple consumers by how much each actually needs.
+const INPUTS_QTY_BY_NAME = new Map<string, { name: string; qty: number }[]>()
+for (const s of ALL_SCHEMATICS) {
+  const outName = PRODUCT_BY_TYPE_ID.get(s.output.typeId)?.name
+  if (!outName) continue
+  INPUTS_QTY_BY_NAME.set(outName, s.inputs
+    .map(i => ({ name: PRODUCT_BY_TYPE_ID.get(i.typeId)?.name ?? '', qty: i.quantity }))
+    .filter(x => x.name))
+}
+
+/** "half to A · half to B", or "60% to A · 40% to B" for uneven demand. */
+function formatSplit(splits: { name: string; share: number }[]): string {
+  const allEven = splits.every(s => Math.abs(s.share - splits[0].share) < 0.01)
+  const word = (s: { name: string; share: number }) =>
+    allEven
+      ? `${splits.length === 2 ? 'half' : `1/${splits.length}`} to ${s.name}`
+      : `${Math.round(s.share * 100)}% to ${s.name}`
+  return splits.map(word).join(' · ')
+}
+
+/** How much of `material` a character consumes per cycle across all its factories. */
+function materialDemand(char: StoredCharacter, material: string): number {
+  let q = 0
+  for (const p of char.planets)
+    for (const out of p.outputNames ?? [])
+      for (const inp of INPUTS_QTY_BY_NAME.get(out) ?? [])
+        if (inp.name === material) q += inp.qty
+  return q
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,7 +114,8 @@ interface DeliverStop {
 }
 
 interface ResetItem { planet: Planet; p1s: string[]; urgency: Urgency }
-interface DepositItem { material: string; tier: string; toNames: string[] }
+interface DepositSplit { name: string; share: number }
+interface DepositItem { material: string; tier: string; toNames: string[]; splits?: DepositSplit[] }
 
 interface AltStep {
   id: string          // unique per step (an alt can appear twice: primary + return visit)
@@ -251,10 +284,17 @@ function computeSteps(characters: StoredCharacter[], now: number, orderIds?: num
 
     const deposits: DepositItem[] = [...own]
       .map(material => {
-        const toNames = characters
+        const consumers = characters
           .filter(c2 => c2.characterId !== cid && (neededByChar.get(c2.characterId)?.has(material) ?? false))
-          .map(c2 => c2.characterName)
-        return { material, tier: tierOf(material), toNames }
+        const toNames = consumers.map(c2 => c2.characterName)
+        // When a material feeds 2+ consumers, split it by how much each needs.
+        let splits: DepositSplit[] | undefined
+        if (consumers.length > 1) {
+          const demands = consumers.map(c2 => ({ name: c2.characterName, d: Math.max(1, materialDemand(c2, material)) }))
+          const total = demands.reduce((s, x) => s + x.d, 0)
+          splits = demands.map(x => ({ name: x.name, share: x.d / total }))
+        }
+        return { material, tier: tierOf(material), toNames, splits }
       })
       .filter(d => d.toNames.length > 0)
       .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier])
@@ -727,7 +767,13 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       <span className={styles.chip} style={{ '--tier-color': TIER_COLOR[d.tier] } as React.CSSProperties}>
                         <span className={styles.chipTier}>{d.tier}</span>{d.material}
                       </span>
-                      <span className={styles.sourceNote}>for {d.toNames.join(', ')}</span>
+                      {d.splits ? (
+                        <span className={styles.sourceNote}>
+                          split <span className={styles.splitLabel}>{formatSplit(d.splits)}</span>
+                        </span>
+                      ) : (
+                        <span className={styles.sourceNote}>for {d.toNames.join(', ')}</span>
+                      )}
                     </div>
                   </label>
                 ))}
