@@ -184,6 +184,12 @@
   min-height: 0;
   overflow-y: auto;
   padding: 20px 24px 28px;
+  /* Cap the content width so rows don't stretch across huge monitors and strand
+     the status (e.g. "Expired") far to the right. */
+  width: 100%;
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .altHeader {
@@ -315,6 +321,83 @@
 .timer_idle     { color: var(--text-muted); font-weight: 400; font-style: italic; }
 
 .nothing { padding: 30px 8px; color: var(--text-muted); font-size: 13px; font-style: italic; }
+
+/* ESI-verified reset (✓✓) — extractor is running again, so we know it was reset. */
+.verifiedCheck {
+  flex-shrink: 0;
+  width: 15px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #4ab095;
+  letter-spacing: -2px;
+  cursor: default;
+}
+
+/* "Pick up X before undocking" heads-up */
+.pickupCallout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(74, 144, 217, 0.1);
+  border: 1px solid rgba(74, 144, 217, 0.35);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.pickupCallout strong { color: var(--text-primary); }
+.pickupIcon { font-size: 15px; flex-shrink: 0; }
+
+/* Collapsed "this alt is done" panel */
+.donePanel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 10px;
+  background: rgba(74, 176, 149, 0.08);
+  border: 1px solid rgba(74, 176, 149, 0.3);
+}
+.doneCheckBig {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #4ab095;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.donePanelText { display: flex; flex-direction: column; gap: 3px; font-size: 14px; color: var(--text-primary); }
+.linkBtn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.collapseBtn {
+  margin-top: 16px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.collapseBtn:hover { color: var(--text-secondary); border-color: var(--border-bright); }
 
 /* ── Nav footer ── */
 

@@ -99,7 +99,35 @@ function resetKey(p: Planet): string { return `reset|${p.planetId}` }
 function deliverKey(p: Planet, material: string): string { return `deliver|${p.planetId}|${material}` }
 function depositKey(charId: number, material: string): string { return `deposit|${charId}|${material}` }
 
-function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
+// An extractor counts as ESI-verified-done when its program is running again
+// (expiry is in the future) — i.e. the player reset it in-game since the run began.
+function isResetVerified(planet: Planet, now: number): boolean {
+  return !!planet.expiryTime && new Date(planet.expiryTime).getTime() > now
+}
+
+// ── login order ───────────────────────────────────────────────────────────────
+// Extractors/low-tier first, then by extractor urgency. Used to seed a run; once a
+// run is going we FREEZE this order (see `frozenOrder`) so resetting an extractor
+// in-game doesn't reshuffle the plan underneath the player.
+function charMaxTier(char: StoredCharacter): number {
+  let r = 0
+  for (const p of char.planets) for (const t of p.outputTiers ?? []) r = Math.max(r, TIER_RANK[t] ?? 0)
+  return r
+}
+function charExtractionUrgency(char: StoredCharacter, now: number): number {
+  const ex = char.planets.filter(isExtractorPlanet)
+  return ex.length ? Math.min(...ex.map(p => URGENCY_ORDER[getUrgency(p, now)])) : 99
+}
+export function deriveLoginOrder(characters: StoredCharacter[], now: number): number[] {
+  return [...characters]
+    .sort((a, b) =>
+      charMaxTier(a) - charMaxTier(b) ||
+      charExtractionUrgency(a, now) - charExtractionUrgency(b, now) ||
+      a.characterName.localeCompare(b.characterName))
+    .map(c => c.characterId)
+}
+
+function computeSteps(characters: StoredCharacter[], now: number, orderIds?: number[]): AltStep[] {
   // ── indexes ──
   const producedByChar = new Map<number, Set<string>>()
   const producerCharsByMaterial = new Map<string, Set<number>>()
@@ -135,21 +163,15 @@ function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
     neededByChar.set(char.characterId, needs)
   }
 
-  // ── login order: extractors/low-tier first, then by extractor urgency ──
-  function maxTier(char: StoredCharacter): number {
-    let r = 0
-    for (const p of char.planets) for (const t of p.outputTiers ?? []) r = Math.max(r, TIER_RANK[t] ?? 0)
-    return r
-  }
-  function extractionUrgency(char: StoredCharacter): number {
-    const ex = char.planets.filter(isExtractorPlanet)
-    return ex.length ? Math.min(...ex.map(p => URGENCY_ORDER[getUrgency(p, now)])) : 99
-  }
-  const order = [...characters].sort((a, b) =>
-    maxTier(a) - maxTier(b) ||
-    extractionUrgency(a) - extractionUrgency(b) ||
-    a.characterName.localeCompare(b.characterName)
-  )
+  // ── login order ──
+  // Use the frozen order when one is supplied (a run is in progress); chars not in
+  // it (newly added) fall to the end in freshly-derived order. Otherwise derive fresh.
+  const fallback = deriveLoginOrder(characters, now)
+  const fpos = new Map(fallback.map((id, i) => [id, i]))
+  const frozen = orderIds?.length ? orderIds : fallback
+  const fzpos = new Map(frozen.map((id, i) => [id, i]))
+  const rank = (id: number) => fzpos.has(id) ? fzpos.get(id)! : 1e6 + (fpos.get(id) ?? 0)
+  const order = [...characters].sort((a, b) => rank(a.characterId) - rank(b.characterId))
   const orderIndex = new Map<number, number>()
   order.forEach((c, i) => orderIndex.set(c.characterId, i))
 
@@ -316,6 +338,7 @@ const VERB_PHRASE: Record<string, string> = {
 
 const STORAGE_KEY_CHECKED = 'haulplan.checked'
 const STORAGE_KEY_STEP    = 'haulplan.step'
+const STORAGE_KEY_ORDER   = 'haulplan.order'
 
 function loadChecked(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY_CHECKED) ?? '[]')) }
@@ -323,6 +346,10 @@ function loadChecked(): Set<string> {
 }
 function saveChecked(s: Set<string>) {
   localStorage.setItem(STORAGE_KEY_CHECKED, JSON.stringify([...s]))
+}
+function loadOrder(): number[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ORDER) ?? '[]') }
+  catch { return [] }
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -348,7 +375,26 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     return () => clearInterval(id)
   }, [onRefresh])
 
-  const steps = useMemo(() => computeSteps(characters, now), [characters, now])
+  // Frozen login order — keeps the plan stable during a run. Only changes when the
+  // character set changes (additively) or on an explicit "Reset run"; NOT when an
+  // extractor's timer ticks or gets reset in-game.
+  const [frozenOrder, setFrozenOrder] = useState<number[]>(loadOrder)
+  useEffect(() => {
+    const ids = characters.map(c => c.characterId)
+    setFrozenOrder(prev => {
+      const cur = new Set(ids)
+      const prevSet = new Set(prev)
+      const kept = prev.filter(id => cur.has(id))                       // drop removed alts
+      const added = deriveLoginOrder(characters, Date.now())            // append new alts at the end
+        .filter(id => !prevSet.has(id))
+      const next = [...kept, ...added]
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev
+      localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(next))
+      return next
+    })
+  }, [characters])
+
+  const steps = useMemo(() => computeSteps(characters, now, frozenOrder), [characters, now, frozenOrder])
   const readyAt = useMemo(() => findReadyAt(characters), [characters])
 
   const [checked, setChecked] = useState<Set<string>>(loadChecked)
@@ -359,6 +405,11 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
 
   const activeIdx = Math.min(active, Math.max(0, steps.length - 1))
   useEffect(() => { localStorage.setItem(STORAGE_KEY_STEP, String(activeIdx)) }, [activeIdx])
+
+  // When an alt is fully done its task list collapses to a compact summary; the
+  // player can expand it again. Reset the expand toggle whenever the alt changes.
+  const [expandDone, setExpandDone] = useState(false)
+  useEffect(() => { setExpandDone(false) }, [activeIdx])
 
   // When the top-bar attention pill is clicked, jump to the first alt that has
   // an expired extractor and briefly pulse its reset rows so the eye lands on
@@ -396,21 +447,43 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     const empty = new Set<string>()
     setChecked(empty)
     saveChecked(empty)
+    // Start a fresh run: re-derive the login order from the current state.
+    const fresh = deriveLoginOrder(characters, Date.now())
+    setFrozenOrder(fresh)
+    localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(fresh))
   }
 
   if (characters.length === 0)
     return <div className={styles.empty}>Add characters to see the hauling plan.</div>
 
+  // Resets the player already did in-game (ESI sees the extractor running again) are
+  // auto-verified (✓✓) — counted done without being manually checked, and never
+  // removed from the plan.
+  const verifiedResetKeys = new Set<string>()
+  for (const s of steps)
+    for (const r of s.resets)
+      if (isResetVerified(r.planet, now)) verifiedResetKeys.add(resetKey(r.planet))
+
+  const isDone = (key: string) => checked.has(key) || verifiedResetKeys.has(key)
+
   const allKeys = steps.flatMap(s => s.taskKeys)
-  const doneItems = allKeys.filter(k => checked.has(k)).length
+  const doneItems = allKeys.filter(isDone).length
   const totalItems = allKeys.length
 
   const isOverdue = readyAt ? readyAt.getTime() <= now : false
   const step = steps[activeIdx]
 
   function stepDone(s: AltStep): boolean {
-    return s.taskKeys.length > 0 && s.taskKeys.every(k => checked.has(k))
+    return s.taskKeys.length > 0 && s.taskKeys.every(isDone)
   }
+
+  // Pickup heads-up: materials this alt must collect from the shared container
+  // (left by an earlier alt) before undocking.
+  const pickupMaterials = step
+    ? [...new Set(step.stops.flatMap(s => s.inputs.filter(i => i.ready && !i.self).map(i => i.material)))]
+    : []
+
+  const activeDone = step ? stepDone(step) : false
 
   return (
     <div className={styles.root}>
@@ -496,16 +569,42 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             </div>
           </div>
 
+          {pickupMaterials.length > 0 && !activeDone && (
+            <div className={styles.pickupCallout}>
+              <span className={styles.pickupIcon}>📦</span>
+              <span><strong>Before undocking:</strong> pick up {pickupMaterials.join(', ')} from the shared container.</span>
+            </div>
+          )}
+
+          {activeDone && !expandDone ? (
+            <div className={styles.donePanel}>
+              <span className={styles.doneCheckBig}>✓</span>
+              <div className={styles.donePanelText}>
+                <strong>{step.char.characterName} is all done.</strong>
+                <button className={styles.linkBtn} onClick={() => setExpandDone(true)}>Show steps</button>
+              </div>
+            </div>
+          ) : (
+          <>
+          {activeDone && (
+            <button className={styles.collapseBtn} onClick={() => setExpandDone(false)}>▲ Collapse completed steps</button>
+          )}
+
           {/* Reset & collect */}
           {step.resets.length > 0 && (
             <div className={styles.section}>
               <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="reset" />Reset &amp; collect extractors</div>
               {step.resets.map(r => {
                 const key = resetKey(r.planet)
-                const done = checked.has(key)
+                const verified = verifiedResetKeys.has(key)
+                const done = verified || checked.has(key)
                 return (
                   <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''} ${pulsing && r.urgency === 'expired' && !done ? styles.taskPulse : ''}`}>
-                    <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
+                    {verified ? (
+                      <span className={styles.verifiedCheck} title="Verified via ESI — this extractor is running again">✓✓</span>
+                    ) : (
+                      <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
+                    )}
                     <div className={styles.taskBody}>
                       <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[r.planet.type] }} title={r.planet.type} />
                       <span className={styles.planetName}>{r.planet.name}</span>
@@ -545,7 +644,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                   </div>
                   {stop.inputs.map(inp => {
                     const key = deliverKey(stop.planet, inp.material)
-                    const done = checked.has(key)
+                    const done = isDone(key)
                     return (
                       <label
                         key={inp.material}
@@ -578,7 +677,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
               <div className={styles.sectionTitle}><span className={styles.sectionDot} data-kind="input" />Drop into shared PI container</div>
               {step.deposits.map(d => {
                 const key = depositKey(step.char.characterId, d.material)
-                const done = checked.has(key)
+                const done = isDone(key)
                 return (
                   <label key={d.material} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
                     <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
@@ -597,6 +696,8 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
           {step.taskKeys.length === 0 && (
             <div className={styles.nothing}>Nothing to do on this alt right now.</div>
           )}
+          </>
+          )}
         </div>
 
         {/* Nav */}
@@ -605,7 +706,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             ← Prev
           </button>
           <span className={styles.navHint}>
-            {stepDone(step) ? 'All done on this alt' : `${step.taskKeys.filter(k => checked.has(k)).length}/${step.taskKeys.length} done`}
+            {stepDone(step) ? 'All done on this alt' : `${step.taskKeys.filter(isDone).length}/${step.taskKeys.length} done`}
           </span>
           {activeIdx < steps.length - 1 ? (
             <button className={styles.navPrimary} onClick={() => completeAndNext(step)}>
