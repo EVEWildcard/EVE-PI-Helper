@@ -77,6 +77,8 @@ const PAD_X   = 32
 const PAD_Y   = 48
 const NODE_H_EST = 90  // rough estimate for first layout pass
 const NARROW_BREAKPOINT = 640  // below this, fit-height + horizontal pan instead of shrink-to-fit
+const WRAP_MAX_PER_ROW = 9  // a tier with more nodes than this wraps into multiple sub-rows
+const WRAP_ROW_GAP = 28     // vertical gap between wrapped sub-rows within one tier band
 
 // ── graph builder ─────────────────────────────────────────────────────────────
 
@@ -583,28 +585,55 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
   // Horizontal layout helpers (initial estimate before measurement)
 
 
-  // Vertical layout helpers — each tier band is centered, tiers stack bottom-to-top
+  // Vertical layout helpers — each tier band is centered, tiers stack bottom-to-top.
+  // A tier with more than WRAP_MAX_PER_ROW nodes wraps into multiple sub-rows so it
+  // doesn't sprawl sideways (and force the whole graph to shrink). Most chains have
+  // small tiers and stay a single row; only the genuinely-crazy ones (big P2 tiers)
+  // wrap. Desktop and narrow both honour this.
   const colCounts = useMemo(() => {
     const m = new Map<number, number>()
     for (const n of nodes) m.set(n.column, (m.get(n.column) ?? 0) + 1)
     return m
   }, [nodes])
-  const maxColCount = Math.max(1, ...Array.from(colCounts.values()))
-  const vTotalInnerW = maxColCount * NODE_W + (maxColCount - 1) * ROW_GAP
-  const vNodeX = (node: ChainNode) => {
-    const count = colCounts.get(node.column) ?? 1
-    const offset = ((maxColCount - count) * (NODE_W + ROW_GAP)) / 2
-    return PAD_X + offset + node.row * (NODE_W + ROW_GAP)
-  }
-  const vEstColY = (col: number) =>
-    PAD_Y + (maxAssignedCol - col) * (NODE_H_EST + COL_GAP)
+  const tierSubRows = (col: number) => Math.max(1, Math.ceil((colCounts.get(col) ?? 1) / WRAP_MAX_PER_ROW))
+  const tierPerRow = (col: number) => Math.ceil((colCounts.get(col) ?? 1) / tierSubRows(col))
+  // Widest single row across all tiers (after wrapping) — drives centering + total width.
+  const maxRowCount = Math.max(1, ...Array.from(colCounts.keys()).map(tierPerRow))
+  const vTotalInnerW = maxRowCount * NODE_W + (maxRowCount - 1) * ROW_GAP
 
-  const getNodeEstPos = (node: ChainNode) => ({ x: vNodeX(node), y: vEstColY(node.column) })
+  const vNodeX = (node: ChainNode) => {
+    const col = node.column
+    const perRow = tierPerRow(col)
+    const count = colCounts.get(col) ?? 1
+    const colInRow = node.row % perRow
+    const subRow = Math.floor(node.row / perRow)
+    const nodesInRow = Math.min(perRow, count - subRow * perRow)
+    const offset = ((maxRowCount - nodesInRow) * (NODE_W + ROW_GAP)) / 2
+    return PAD_X + offset + colInRow * (NODE_W + ROW_GAP)
+  }
+  // Sub-row index of a node within its own (possibly wrapped) tier band.
+  const nodeSubRow = (node: ChainNode) => Math.floor(node.row / tierPerRow(node.column))
+  // Estimated band-top Y (before measurement). Each tier above adds its full wrapped height.
+  const vEstColY = (col: number) => {
+    let y = PAD_Y
+    for (let c = maxAssignedCol; c > col; c--) {
+      const rows = tierSubRows(c)
+      y += NODE_H_EST * rows + WRAP_ROW_GAP * (rows - 1) + COL_GAP
+    }
+    return y
+  }
+
+  const getNodeEstPos = (node: ChainNode) => ({
+    x: vNodeX(node),
+    y: vEstColY(node.column) + nodeSubRow(node) * (NODE_H_EST + WRAP_ROW_GAP),
+  })
 
   const getPos = (node: ChainNode) => nodePos.get(node.key) ?? getNodeEstPos(node)
 
   const totalW = PAD_X * 2 + vTotalInnerW
-  const totalH = svgSize.h || (vEstColY(0) + NODE_H_EST + PAD_Y * 2)
+  const bottomRows = tierSubRows(0)
+  const totalH = svgSize.h ||
+    (vEstColY(0) + NODE_H_EST * bottomRows + WRAP_ROW_GAP * (bottomRows - 1) + PAD_Y * 2)
 
   // On a wide screen we scale the whole graph to fit. On a narrow/portrait
   // screen that would make it microscopic, so instead fit the HEIGHT (tiers
@@ -640,11 +669,16 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
     let y = PAD_Y
     for (const col of [...cols].reverse()) {
       bandY.set(col, y)
-      y += (bandH.get(col) ?? NODE_H_EST) + COL_GAP
+      // A wrapped tier is taller — it stacks into multiple sub-rows.
+      const rowH = bandH.get(col) ?? NODE_H_EST
+      const rows = Math.max(1, Math.ceil((colCounts.get(col) ?? 1) / WRAP_MAX_PER_ROW))
+      y += rowH * rows + WRAP_ROW_GAP * (rows - 1) + COL_GAP
     }
     const newPos = new Map<string, { x: number; y: number }>()
     for (const node of nodes) {
-      newPos.set(node.key, { x: vNodeX(node), y: bandY.get(node.column) ?? vEstColY(node.column) })
+      const top = bandY.get(node.column) ?? vEstColY(node.column)
+      const rowH = bandH.get(node.column) ?? NODE_H_EST
+      newPos.set(node.key, { x: vNodeX(node), y: top + nodeSubRow(node) * (rowH + WRAP_ROW_GAP) })
     }
     setNodePos(newPos)
     setNodeSizes(sizes)
