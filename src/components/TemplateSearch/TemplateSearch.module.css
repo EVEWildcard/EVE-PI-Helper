@@ -11,6 +11,24 @@
 
 /* ── Floating action button ── */
 
+.fabWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.fabLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+  transition: color 0.15s;
+}
+.fabWrap:hover .fabLabel { color: var(--text-secondary); }
+
 .fab {
   width: 36px;
   height: 36px;

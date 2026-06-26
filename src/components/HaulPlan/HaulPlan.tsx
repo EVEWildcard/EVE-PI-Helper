@@ -71,6 +71,7 @@ interface DeliverInput {
   self: boolean       // produced on one of your own planets
   fromName?: string   // ready pickup: which alt left it in the container
   waitName?: string   // deferred: which alt produces it later (come back after)
+  waitId?: number     // deferred: characterId of that later producer (for ordering the return visit)
   urgency: Urgency
 }
 
@@ -84,7 +85,9 @@ interface ResetItem { planet: Planet; p1s: string[]; urgency: Urgency }
 interface DepositItem { material: string; tier: string; toNames: string[] }
 
 interface AltStep {
+  id: string          // unique per step (an alt can appear twice: primary + return visit)
   char: StoredCharacter
+  isReturn?: boolean   // a return visit to finish deliveries that were waiting on a later alt
   verbs: string[]
   resets: ResetItem[]
   stops: DeliverStop[]
@@ -158,8 +161,13 @@ function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
     for (const m of producedByChar.get(char.characterId) ?? []) acc.add(m)
   }
 
-  // ── build a step per alt ──
-  return order.map(char => {
+  // ── build a primary step per alt, plus a return-visit step for any alt that
+  //    has deliveries waiting on a LATER alt (you come back once that alt has
+  //    deposited what you need). ──
+  const primarySteps: AltStep[] = []
+  const returnSteps: { step: AltStep; afterIndex: number }[] = []
+
+  order.forEach(char => {
     const cid = char.characterId
     const own = producedByChar.get(cid)!
     const before = availableBefore.get(cid)!
@@ -188,12 +196,13 @@ function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
         let ready = self
         let fromName: string | undefined
         let waitName: string | undefined
+        let waitId: number | undefined
         if (!self) {
           const earlier = others.find(id => (orderIndex.get(id) ?? 0) < (orderIndex.get(cid) ?? 0))
           if (earlier != null) { ready = true; fromName = nameById.get(earlier) }
           else {
             const later = others.sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0))[0]
-            if (later != null) waitName = nameById.get(later)
+            if (later != null) { waitName = nameById.get(later); waitId = later }
           }
         } else if (before.has(material)) {
           // also stocked by an earlier alt — still your own, leave note off
@@ -205,6 +214,7 @@ function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
           self,
           fromName,
           waitName,
+          waitId,
           urgency: inputUrgency.get(material) ?? 'idle',
         }
       }).sort((a, b) => Number(b.ready) - Number(a.ready) || URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency])
@@ -227,22 +237,73 @@ function computeSteps(characters: StoredCharacter[], now: number): AltStep[] {
       .filter(d => d.toNames.length > 0)
       .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier])
 
-    // verbs
-    const hasPickup = stops.some(s => s.inputs.some(i => i.ready && !i.self))
+    // Split each stop's inputs into "do now" vs "deferred" (waiting on a later alt).
+    const nowStops: DeliverStop[] = []
+    const deferredStops: DeliverStop[] = []
+    let returnAfter = -1
+    for (const s of stops) {
+      const nowInputs = s.inputs.filter(i => i.waitId == null)
+      const defInputs = s.inputs.filter(i => i.waitId != null)
+      if (nowInputs.length) nowStops.push({ ...s, inputs: nowInputs })
+      if (defInputs.length) {
+        // On the return visit those inputs are now sitting in the container.
+        deferredStops.push({
+          ...s,
+          inputs: defInputs.map(i => ({ ...i, ready: true, self: false, fromName: i.waitName, waitName: undefined, waitId: undefined })),
+        })
+        for (const i of defInputs) returnAfter = Math.max(returnAfter, orderIndex.get(i.waitId!) ?? -1)
+      }
+    }
+
+    // verbs (primary)
+    const hasPickup = nowStops.some(s => s.inputs.some(i => i.ready && !i.self))
     const verbs: string[] = []
     if (resets.length) { verbs.push('Reset', 'Collect') }
     if (deposits.length) verbs.push('Input')
     if (hasPickup) verbs.push('Pickup')
-    if (stops.length) verbs.push('Deliver')
+    if (nowStops.length) verbs.push('Deliver')
 
     const taskKeys: string[] = [
       ...resets.map(r => resetKey(r.planet)),
-      ...stops.flatMap(s => s.inputs.map(i => deliverKey(s.planet, i.material))),
+      ...nowStops.flatMap(s => s.inputs.map(i => deliverKey(s.planet, i.material))),
       ...deposits.map(d => depositKey(cid, d.material)),
     ]
 
-    return { char, verbs, resets, stops, deposits, taskKeys }
+    primarySteps.push({ id: String(cid), char, verbs, resets, stops: nowStops, deposits, taskKeys })
+
+    if (deferredStops.length) {
+      returnSteps.push({
+        afterIndex: returnAfter,
+        step: {
+          id: `${cid}:return`,
+          char,
+          isReturn: true,
+          verbs: ['Pickup', 'Deliver'],
+          resets: [],
+          stops: deferredStops,
+          deposits: [],
+          taskKeys: deferredStops.flatMap(s => s.inputs.map(i => deliverKey(s.planet, i.material))),
+        },
+      })
+    }
   })
+
+  // Assemble: each return visit slots in right after the last alt it was waiting on.
+  const afterMap = new Map<number, AltStep[]>()
+  const tail: AltStep[] = []
+  for (const r of returnSteps) {
+    if (r.afterIndex >= 0 && r.afterIndex < primarySteps.length) {
+      const arr = afterMap.get(r.afterIndex) ?? []
+      arr.push(r.step); afterMap.set(r.afterIndex, arr)
+    } else tail.push(r.step)
+  }
+  const result: AltStep[] = []
+  primarySteps.forEach((ps, idx) => {
+    result.push(ps)
+    for (const rs of afterMap.get(idx) ?? []) result.push(rs)
+  })
+  result.push(...tail)
+  return result
 }
 
 const VERB_PHRASE: Record<string, string> = {
@@ -372,31 +433,38 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
         </div>
       </div>
 
-      {/* Stepper: one circle per alt = one login */}
+      {/* Stepper: each circle = one login. An alt can appear twice — a primary
+          visit and a later "return" visit to finish deliveries that were waiting
+          on a later alt. Arrows show you move left-to-right through the logins. */}
       <div className={styles.stepper}>
         {steps.map((s, i) => {
           const done = stepDone(s)
           return (
-            <button
-              key={s.char.characterId}
-              className={`${styles.step} ${i === activeIdx ? styles.stepActive : ''} ${done ? styles.stepDone : ''}`}
-              onClick={() => setActive(i)}
-            >
-              <span className={styles.stepCircle}>
-                {s.char.characterId > 0 ? (
-                  <img
-                    src={`https://images.evetech.net/characters/${s.char.characterId}/portrait?size=64`}
-                    alt={s.char.characterName}
-                    onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
-                  />
-                ) : (
-                  <span className={styles.stepInitial}>{s.char.characterName[0]}</span>
-                )}
-                {done && <span className={styles.stepCheck}>✓</span>}
-              </span>
-              <span className={styles.stepName}>{s.char.characterName}</span>
-              <span className={styles.stepVerbs}>{s.verbs.join(' · ') || 'Nothing to do'}</span>
-            </button>
+            <React.Fragment key={s.id}>
+              {i > 0 && <span className={styles.stepArrow} aria-hidden="true">→</span>}
+              <button
+                className={`${styles.step} ${i === activeIdx ? styles.stepActive : ''} ${done ? styles.stepDone : ''} ${s.isReturn ? styles.stepReturn : ''}`}
+                onClick={() => setActive(i)}
+              >
+                <span className={styles.stepCircle}>
+                  {s.char.characterId > 0 ? (
+                    <img
+                      src={`https://images.evetech.net/characters/${s.char.characterId}/portrait?size=64`}
+                      alt={s.char.characterName}
+                      onError={e => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
+                    />
+                  ) : (
+                    <span className={styles.stepInitial}>{s.char.characterName[0]}</span>
+                  )}
+                  {s.isReturn && <span className={styles.stepReturnBadge} title="Return visit">↩</span>}
+                  {done && <span className={styles.stepCheck}>✓</span>}
+                </span>
+                <span className={styles.stepName}>
+                  {s.char.characterName}{s.isReturn && <span className={styles.stepReturnTag}> · return</span>}
+                </span>
+                <span className={styles.stepVerbs}>{s.verbs.join(' · ') || 'Nothing to do'}</span>
+              </button>
+            </React.Fragment>
           )
         })}
       </div>
@@ -414,10 +482,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
               />
             )}
             <div className={styles.altHeaderText}>
-              <span className={styles.altStepNum}>Alt {activeIdx + 1} of {steps.length}</span>
-              <span className={styles.altName}>Log in as {step.char.characterName}</span>
+              <span className={styles.altStepNum}>
+                Alt {activeIdx + 1} of {steps.length}{step.isReturn && ' · return visit'}
+              </span>
+              <span className={styles.altName}>
+                {step.isReturn ? 'Log back in as ' : 'Log in as '}{step.char.characterName}
+              </span>
               <span className={styles.altPlan}>
-                {step.verbs.map(v => VERB_PHRASE[v] ?? v).join(' → ') || 'Nothing to do this login'}
+                {step.isReturn
+                  ? 'Finish the deliveries that were waiting on a later alt — they’re in the container now.'
+                  : (step.verbs.map(v => VERB_PHRASE[v] ?? v).join(' → ') || 'Nothing to do this login')}
               </span>
             </div>
           </div>

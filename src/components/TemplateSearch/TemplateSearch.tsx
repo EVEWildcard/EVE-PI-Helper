@@ -16,6 +16,9 @@ const TIER_COLOR: Record<string, string> = {
   P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
 }
 
+const FAB_HINT =
+  'Search a PI product and copy a ready-made setup to your clipboard, then paste it into the in-game Planetary Interaction screen. “Mine” = a P1 extractor layout, “Factory” = a P2+ factory layout.'
+
 type CopyState = 'idle' | 'copying' | 'copied' | 'error'
 
 export function TemplateSearch() {
@@ -109,19 +112,22 @@ export function TemplateSearch() {
           )}
         </div>
       )}
-      <button
-        className={`${styles.fab} ${open ? styles.fabOpen : ''}`}
-        onClick={() => setOpen(v => !v)}
-        title="Template search"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/>
-          <rect x="2" y="7.25" width="8" height="1.5" rx="0.75" fill="currentColor"/>
-          <rect x="2" y="11.5" width="5" height="1.5" rx="0.75" fill="currentColor"/>
-          <circle cx="12.5" cy="11.5" r="2.5" stroke="currentColor" strokeWidth="1.3"/>
-          <path d="M14.2 13.2 L15.5 14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-        </svg>
-      </button>
+      <div className={styles.fabWrap} title={FAB_HINT}>
+        <button
+          className={`${styles.fab} ${open ? styles.fabOpen : ''}`}
+          onClick={() => setOpen(v => !v)}
+          aria-label={FAB_HINT}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="2" y="3" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+            <rect x="2" y="7.25" width="8" height="1.5" rx="0.75" fill="currentColor"/>
+            <rect x="2" y="11.5" width="5" height="1.5" rx="0.75" fill="currentColor"/>
+            <circle cx="12.5" cy="11.5" r="2.5" stroke="currentColor" strokeWidth="1.3"/>
+            <path d="M14.2 13.2 L15.5 14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+        </button>
+        <span className={styles.fabLabel}>Copy PI templates</span>
+      </div>
     </div>
   )
 }

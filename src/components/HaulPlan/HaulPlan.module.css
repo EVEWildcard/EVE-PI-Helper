@@ -86,18 +86,39 @@
 }
 .step:hover { background: var(--bg-hover); }
 
-.step:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  top: 24px;
-  right: -4px;
-  width: 8px;
-  height: 1px;
-  background: var(--border);
-}
-
 .stepActive { background: var(--bg-card); border-color: var(--border-bright); }
 .stepDone { opacity: 0.55; }
+
+/* Arrow between logins — you move left-to-right through the alts. */
+.stepArrow {
+  align-self: flex-start;
+  margin-top: 16px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Return visit — same alt, second appearance. */
+.stepReturn .stepCircle { border-style: dashed; }
+.stepReturnBadge {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.stepReturnTag { color: var(--text-muted); font-weight: 600; }
 
 .stepCircle {
   position: relative;
