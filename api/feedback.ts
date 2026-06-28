@@ -9,6 +9,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const REPO = 'EVEWildcard/EVE-PI-Helper'
 const MAX_MESSAGE = 5000
+// GitHub rejects issue bodies over 65536 chars; cap the snapshot well under that.
+const MAX_SNAPSHOT = 50000
 
 type Meta = Record<string, unknown>
 
@@ -16,6 +18,41 @@ function str(v: unknown, fallback = '—', max = 300): string {
   const s = typeof v === 'string' ? v : v == null ? '' : String(v)
   const t = s.trim()
   return t ? t.slice(0, max) : fallback
+}
+
+// The client sends a sanitized localStorage map (key → string value). Render it
+// as a collapsed, replayable block. Defensive: only keep string→string entries.
+function snapshotBlock(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object') return []
+  const entries = Object.entries(raw as Record<string, unknown>)
+    .filter(([k, v]) => typeof k === 'string' && typeof v === 'string') as [string, string][]
+  if (entries.length === 0) return []
+
+  let json = JSON.stringify(Object.fromEntries(entries), null, 2)
+  let note = ''
+  if (json.length > MAX_SNAPSHOT) {
+    json = json.slice(0, MAX_SNAPSHOT)
+    note = '\n…(truncated)'
+  }
+
+  return [
+    '',
+    '<details><summary>🛰️ Anonymized PI snapshot (click to expand)</summary>',
+    '',
+    'Reporter\'s setup with all account/character names removed. To reproduce locally,',
+    'paste this into the browser console on the app, then reload:',
+    '',
+    '```js',
+    'const s = /* paste the JSON below */;',
+    'Object.entries(s).forEach(([k, v]) => localStorage.setItem(k, v));',
+    'location.reload();',
+    '```',
+    '',
+    '```json',
+    json + note,
+    '```',
+    '</details>',
+  ]
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -67,6 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `- **Locale:** ${str(meta.locale)}`,
     `- **Time:** ${str(meta.timestamp, new Date().toISOString())}`,
     `- **User agent:** ${str(meta.userAgent ?? req.headers['user-agent'])}`,
+    ...snapshotBlock(body.snapshot),
   ].join('\n')
 
   const labels = [type === 'bug' ? 'bug' : 'enhancement']

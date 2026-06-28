@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { APP_VERSION } from '../../version'
+import { buildSnapshot } from './snapshot'
 import styles from './FeedbackModal.module.css'
 
 type FeedbackType = 'bug' | 'idea'
@@ -32,6 +33,9 @@ export function FeedbackModal({ screen, characterCount, onClose }: Props) {
   const [issueUrl, setIssueUrl] = useState<string | null>(null)
 
   const meta = buildMeta(screen, characterCount)
+  // Privacy-safe snapshot of the current PI setup so we can reproduce the report
+  // locally. No account or character names — see snapshot.ts. Built once on open.
+  const snapshot = useMemo(() => buildSnapshot(), [])
 
   async function submit() {
     if (!message.trim() || status === 'sending') return
@@ -41,7 +45,7 @@ export function FeedbackModal({ screen, characterCount, onClose }: Props) {
       const resp = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, message: message.trim(), website, meta }),
+        body: JSON.stringify({ type, message: message.trim(), website, meta, snapshot: snapshot?.data }),
       })
       const data = await resp.json().catch(() => ({}))
       if (!resp.ok || !data.ok) {
@@ -58,8 +62,9 @@ export function FeedbackModal({ screen, characterCount, onClose }: Props) {
   }
 
   function copyReport() {
-    const text = `[${type}] ${message.trim()}\n\n${Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')}`
-    navigator.clipboard?.writeText(text).catch(() => {})
+    const metaText = Object.entries(meta).map(([k, v]) => `${k}: ${v}`).join('\n')
+    const snapText = snapshot ? `\n\nPI snapshot (anonymized):\n${JSON.stringify(snapshot.data)}` : ''
+    navigator.clipboard?.writeText(`[${type}] ${message.trim()}\n\n${metaText}${snapText}`).catch(() => {})
   }
 
   return (
@@ -85,7 +90,9 @@ export function FeedbackModal({ screen, characterCount, onClose }: Props) {
             <h2 className={styles.title}>Send feedback</h2>
             <p className={styles.text}>
               Found a bug or have an idea? Tell us — it genuinely helps. We'll include which
-              screen you're on and a bit of technical info to help us track it down.
+              screen you're on, a bit of technical info, and an anonymized copy of your PI setup
+              (planets &amp; skills — <strong>never</strong> your account or character names) so we
+              can reproduce it.
             </p>
 
             <div className={styles.typeToggle}>
@@ -128,6 +135,7 @@ export function FeedbackModal({ screen, characterCount, onClose }: Props) {
 
             <p className={styles.metaNote}>
               Sending from <strong>{screen}</strong> · v{APP_VERSION} · {characterCount} character{characterCount !== 1 ? 's' : ''}
+              {snapshot && ` · ${snapshot.summary.planets} planet${snapshot.summary.planets !== 1 ? 's' : ''} (anonymized)`}
             </p>
 
             {status === 'error' && (

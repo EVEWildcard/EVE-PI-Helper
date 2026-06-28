@@ -1,3 +1,3 @@
-export const APP_VERSION = '1.6.0'
+export const APP_VERSION = '1.7.0'
 
-export const LATEST_CHANGE = 'v1.6.0 — Haul Plan shows how to split a deposit between multiple consumers'
+export const LATEST_CHANGE = 'v1.7.0 — Bug reports include an anonymized snapshot of your PI setup'
