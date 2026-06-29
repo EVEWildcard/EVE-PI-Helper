@@ -7,78 +7,25 @@ import { useChainSuggestions, useBalanceHints, formatTrainTime, type ChainSugges
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
+import {
+  NODE_W,
+  computeColCounts, computeTotalW, estimateTotalH, computeScale,
+  computeMeasuredPositions, computeArrows,
+  vEstColY as vEstColYPure, getNodeEstPos as getNodeEstPosPure,
+  type ClusterMember, type ChainNode, type ChainEdge, type ArrowPath,
+} from './chainLayout'
 import styles from './ChainView.module.css'
 
-// ── types ─────────────────────────────────────────────────────────────────────
-
-interface ClusterMember {
-  planetName: string
-  characterName: string
-  characterId: number
-  outputNames: string[]
-  outputTiers: PITier[]
-}
-
-interface ChainNode {
-  key: string
-  planetId: number
-  planetName: string
-  planetType: string
-  characterId: number
-  characterName: string
-  outputTypeIds: number[]
-  outputNames: string[]     // all products this planet makes
-  outputTiers: PITier[]
-  outputName: string        // primary (highest tier) output name, '' when unassigned
-  outputTier: PITier        // tier of primary output
-  inputNames: string[]      // union of inputs across all schematics
-  unassigned: boolean
-  column: number
-  row: number
-  // P1 cluster nodes
-  isCluster?: true
-  clusterMembers?: ClusterMember[]
-  // ghost nodes
-  suggested?: true
-  suggestion?: ChainSuggestion   // set on both main and step ghost nodes
-  isStep?: true                  // true for intermediate step nodes (extractor/factory)
-}
-
-interface ChainEdge {
-  fromKey: string
-  toKey: string
-  productName: string
-  tier: PITier
-}
-
-interface ArrowPath {
-  d: string
-  color: string
-  label: string
-  labelX: number
-  labelY: number
-  fromKey: string
-  toKey: string
-  ghost?: boolean
-}
-
 // ── constants ─────────────────────────────────────────────────────────────────
+// Geometry constants + the layout math live in ./chainLayout. Color/label maps
+// stay here (TIER_COLOR is passed into the arrow builder as a param so the layout
+// module carries no color policy).
 
 const TIER_COLOR: Record<PITier, string> = {
   P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
 }
 const TIER_COL: Partial<Record<string, number>> = { P1: 0, P2: 1, P3: 2, P4: 3 }
 const COL_LABELS = ['P1 — Extraction', 'P2 — Refining', 'P3 — Specialized', 'P4 — Advanced']
-
-const NODE_W  = 220
-const COL_GAP = 100
-const ROW_GAP = 16
-const PAD_X   = 32
-const PAD_Y   = 48
-const NODE_H_EST = 90  // rough estimate for first layout pass
-const NARROW_BREAKPOINT = 640  // below this, fit-height + horizontal pan instead of shrink-to-fit
-const WRAP_MAX_PER_ROW = 9  // a tier with more nodes than this wraps into multiple sub-rows
-const WRAP_ROW_GAP = 28     // vertical gap between wrapped sub-rows within one tier band
 
 // ── graph builder ─────────────────────────────────────────────────────────────
 
@@ -323,18 +270,6 @@ function getMissingInputHint(name: string): string {
   const inputList = directInputs.join(' + ')
   const p0List = p0s.join(', ')
   return `Needs: ${inputList}\nP0 sources required: ${p0List}`
-}
-
-// ── bezier arrow ──────────────────────────────────────────────────────────────
-
-function _makeBezierH(x1: number, y1: number, x2: number, y2: number): string {
-  const cx = (x1 + x2) / 2
-  return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`
-}
-
-function makeBezierV(x1: number, y1: number, x2: number, y2: number): string {
-  const cy = (y1 + y2) / 2
-  return `M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}`
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -582,105 +517,34 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
   const hasUnassigned = nodes.some(n => n.unassigned)
   const maxAssignedCol = nodes.filter(n => !n.unassigned).reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Horizontal layout helpers (initial estimate before measurement)
-
-
-  // Vertical layout helpers — each tier band is centered, tiers stack bottom-to-top.
-  // A tier with more than WRAP_MAX_PER_ROW nodes wraps into multiple sub-rows so it
-  // doesn't sprawl sideways (and force the whole graph to shrink). Most chains have
-  // small tiers and stay a single row; only the genuinely-crazy ones (big P2 tiers)
-  // wrap. Desktop and narrow both honour this.
-  const colCounts = useMemo(() => {
-    const m = new Map<number, number>()
-    for (const n of nodes) m.set(n.column, (m.get(n.column) ?? 0) + 1)
-    return m
-  }, [nodes])
-  const tierSubRows = (col: number) => Math.max(1, Math.ceil((colCounts.get(col) ?? 1) / WRAP_MAX_PER_ROW))
-  const tierPerRow = (col: number) => Math.ceil((colCounts.get(col) ?? 1) / tierSubRows(col))
-  // Widest single row across all tiers (after wrapping) — drives centering + total width.
-  const maxRowCount = Math.max(1, ...Array.from(colCounts.keys()).map(tierPerRow))
-  const vTotalInnerW = maxRowCount * NODE_W + (maxRowCount - 1) * ROW_GAP
-
-  const vNodeX = (node: ChainNode) => {
-    const col = node.column
-    const perRow = tierPerRow(col)
-    const count = colCounts.get(col) ?? 1
-    const colInRow = node.row % perRow
-    const subRow = Math.floor(node.row / perRow)
-    const nodesInRow = Math.min(perRow, count - subRow * perRow)
-    const offset = ((maxRowCount - nodesInRow) * (NODE_W + ROW_GAP)) / 2
-    return PAD_X + offset + colInRow * (NODE_W + ROW_GAP)
-  }
-  // Sub-row index of a node within its own (possibly wrapped) tier band.
-  const nodeSubRow = (node: ChainNode) => Math.floor(node.row / tierPerRow(node.column))
-  // Estimated band-top Y (before measurement). Each tier above adds its full wrapped height.
-  const vEstColY = (col: number) => {
-    let y = PAD_Y
-    for (let c = maxAssignedCol; c > col; c--) {
-      const rows = tierSubRows(c)
-      y += NODE_H_EST * rows + WRAP_ROW_GAP * (rows - 1) + COL_GAP
-    }
-    return y
-  }
-
-  const getNodeEstPos = (node: ChainNode) => ({
-    x: vNodeX(node),
-    y: vEstColY(node.column) + nodeSubRow(node) * (NODE_H_EST + WRAP_ROW_GAP),
-  })
-
+  // Layout math lives in ./chainLayout (pure). These thin closures bind the
+  // current node set so call sites stay terse.
+  const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
+  const vEstColY = (col: number) => vEstColYPure(col, colCounts, maxAssignedCol)
+  const getNodeEstPos = (node: ChainNode) => getNodeEstPosPure(node, colCounts, maxAssignedCol)
   const getPos = (node: ChainNode) => nodePos.get(node.key) ?? getNodeEstPos(node)
 
-  const totalW = PAD_X * 2 + vTotalInnerW
-  const bottomRows = tierSubRows(0)
-  const totalH = svgSize.h ||
-    (vEstColY(0) + NODE_H_EST * bottomRows + WRAP_ROW_GAP * (bottomRows - 1) + PAD_Y * 2)
+  const totalW = computeTotalW(colCounts)
+  const totalH = svgSize.h || estimateTotalH(colCounts, maxAssignedCol)
 
-  // On a wide screen we scale the whole graph to fit. On a narrow/portrait
-  // screen that would make it microscopic, so instead fit the HEIGHT (tiers
-  // stay readable) and let the user pan horizontally (Phase 1 mobile support).
-  const isNarrow = containerW > 0 && containerW < NARROW_BREAKPOINT
-  const scaleW = containerW > 0 && totalW > 0 ? containerW / totalW : 1.0
-  const scaleH = containerH > 0 && totalH > 0 ? containerH / totalH : 1.0
-  const scale = isNarrow ? Math.min(scaleH, 1) : Math.min(scaleW, scaleH)
+  const { isNarrow, scale } = computeScale(containerW, containerH, totalW, totalH)
 
   // Pass 1: measure actual node sizes → compute real positions
   useLayoutEffect(() => {
     if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setArrows([]); return }
 
     // getBoundingClientRect returns screen pixels (post-scale); divide by scale to get CSS pixels
-    const currentNarrow = containerW > 0 && containerW < NARROW_BREAKPOINT
-    const currentScaleW = containerW > 0 && totalW > 0 ? containerW / totalW : 1.0
-    const currentScaleH = containerH > 0 && totalH > 0 ? containerH / totalH : 1.0
-    const currentScale = currentNarrow ? Math.min(currentScaleH, 1) : Math.min(currentScaleW, currentScaleH)
+    const { scale: currentScale } = computeScale(containerW, containerH, totalW, totalH)
 
-    const bandH = new Map<number, number>()
     const sizes = new Map<string, { w: number; h: number }>()
     for (const node of nodes) {
       const el = nodeRefs.current.get(node.key)
       if (!el) continue
       const r = el.getBoundingClientRect()
-      const cssH = r.height / currentScale
-      const cssW = r.width / currentScale
-      sizes.set(node.key, { w: cssW, h: cssH })
-      bandH.set(node.column, Math.max(bandH.get(node.column) ?? 0, cssH))
+      sizes.set(node.key, { w: r.width / currentScale, h: r.height / currentScale })
     }
-    const cols = Array.from(new Set(nodes.map(n => n.column))).sort((a, b) => a - b)
-    const bandY = new Map<number, number>()
-    let y = PAD_Y
-    for (const col of [...cols].reverse()) {
-      bandY.set(col, y)
-      // A wrapped tier is taller — it stacks into multiple sub-rows.
-      const rowH = bandH.get(col) ?? NODE_H_EST
-      const rows = Math.max(1, Math.ceil((colCounts.get(col) ?? 1) / WRAP_MAX_PER_ROW))
-      y += rowH * rows + WRAP_ROW_GAP * (rows - 1) + COL_GAP
-    }
-    const newPos = new Map<string, { x: number; y: number }>()
-    for (const node of nodes) {
-      const top = bandY.get(node.column) ?? vEstColY(node.column)
-      const rowH = bandH.get(node.column) ?? NODE_H_EST
-      newPos.set(node.key, { x: vNodeX(node), y: top + nodeSubRow(node) * (rowH + WRAP_ROW_GAP) })
-    }
-    setNodePos(newPos)
+    const { positions } = computeMeasuredPositions(nodes, colCounts, maxAssignedCol, sizes)
+    setNodePos(positions)
     setNodeSizes(sizes)
 
     // Measure input chip center-x values for per-input arrow anchoring
@@ -699,94 +563,9 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
   // Pass 2: draw arrows after positions are settled
   useLayoutEffect(() => {
     if (nodes.length === 0 || nodePos.size === 0 || nodeSizes.size === 0) return
-
-    // Use CSS-space positions and sizes — avoids all scale-transform coordinate confusion
-    const positions = new Map<string, { left: number; right: number; top: number; bottom: number; cx: number; cy: number }>()
-    for (const node of nodes) {
-      const pos = nodePos.get(node.key)
-      const size = nodeSizes.get(node.key)
-      if (!pos || !size) continue
-      positions.set(node.key, {
-        left: pos.x,
-        right: pos.x + size.w,
-        top: pos.y,
-        bottom: pos.y + size.h,
-        cx: pos.x + size.w / 2,
-        cy: pos.y + size.h / 2,
-      })
-    }
-
-    const newArrows: ArrowPath[] = []
-    let maxX = 0, maxY = 0
-
-    // Cluster nodes → destination: one arrow per (clusterKey, toKey) pair,
-    // originating from the cluster node's center.
-    // All other edges: one arrow per edge as normal.
-    const clusterKeys = new Set(nodes.filter(n => n.isCluster).map(n => n.key))
-
-    const clusterEdgeGroups = new Map<string, ChainEdge[]>()
-    const regularEdges: ChainEdge[] = []
-
-    for (const e of edges) {
-      if (clusterKeys.has(e.fromKey)) {
-        const gk = `${e.fromKey}→${e.toKey}`
-        if (!clusterEdgeGroups.has(gk)) clusterEdgeGroups.set(gk, [])
-        clusterEdgeGroups.get(gk)!.push(e)
-      } else {
-        regularEdges.push(e)
-      }
-    }
-
-    // Cluster arrows: one per cluster→dest pair
-    for (const destEdges of clusterEdgeGroups.values()) {
-      const e = destEdges[0]
-      const src = positions.get(e.fromKey)
-      const dst = positions.get(e.toKey)
-      if (!src || !dst) continue
-      const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
-      const label = [...new Set(destEdges.map(g => g.productName))].join(', ')
-      const isGhost = nodes.find(n => n.key === e.toKey)?.suggested === true
-      const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? TIER_COLOR[e.tier])
-      newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
-      maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
-      maxY = Math.max(maxY, src.bottom + PAD_Y, dst.bottom + PAD_Y)
-    }
-
-    // Regular arrows: one per edge
-    for (const e of regularEdges) {
-      const src = positions.get(e.fromKey)
-      const dst = positions.get(e.toKey)
-      if (!src || !dst) continue
-      const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
-      const isGhost = nodes.find(n => n.key === e.toKey)?.suggested === true
-      const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? TIER_COLOR[e.tier])
-      newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label: e.productName, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
-      maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
-      maxY = Math.max(maxY, src.bottom + PAD_Y, dst.bottom + PAD_Y)
-    }
-
-    for (const pos of positions.values()) {
-      maxX = Math.max(maxX, pos.right + PAD_X)
-      maxY = Math.max(maxY, pos.bottom + PAD_Y)
-    }
-
-    // Label collision resolution: sort by Y then greedily push overlapping labels downward
-    const LABEL_H = 14
-    const LABEL_GAP = 3
-    const byY = newArrows.slice().sort((a, b) => a.labelY - b.labelY || a.labelX - b.labelX)
-    for (let i = 1; i < byY.length; i++) {
-      const cur = byY[i]
-      const cw = cur.label.length * 6.4 + 12
-      for (let j = 0; j < i; j++) {
-        const prev = byY[j]
-        const pw = prev.label.length * 6.4 + 12
-        const xOverlap = Math.abs(cur.labelX - prev.labelX) < (cw + pw) / 2 + LABEL_GAP
-        const yOverlap = Math.abs(cur.labelY - prev.labelY) < LABEL_H + LABEL_GAP
-        if (xOverlap && yOverlap) cur.labelY = prev.labelY + LABEL_H + LABEL_GAP
-      }
-    }
-
-    setSvgSize({ w: maxX, h: maxY })
+    const { arrows: newArrows, svgSize: newSvgSize } =
+      computeArrows(nodes, edges, nodePos, nodeSizes, { terminalColorByNode, tierColor: TIER_COLOR })
+    setSvgSize(newSvgSize)
     setArrows(newArrows)
   }, [nodes, edges, nodePos, nodeSizes, terminalColorByNode, inputChipCX])
 
