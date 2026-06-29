@@ -524,6 +524,33 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const hasUnassigned = nodes.some(n => n.unassigned)
   const maxAssignedCol = nodes.filter(n => !n.unassigned).reduce((m, n) => Math.max(m, n.column), -1)
 
+  // Hover-focus: highlight the WHOLE chain the hovered node participates in, dim
+  // the rest. Walk DOWN to every terminal it feeds (descendants), then back UP
+  // from those to extraction (ancestors) — so a mid/high node lights just its
+  // chain, while a genuinely shared input lights every terminal it contributes
+  // to. (Plain undirected reachability over-merges via shared P1s.)
+  const { fwd, bwd } = useMemo(() => {
+    const fwd = new Map<string, Set<string>>()
+    const bwd = new Map<string, Set<string>>()
+    const add = (m: Map<string, Set<string>>, a: string, b: string) => { if (!m.has(a)) m.set(a, new Set()); m.get(a)!.add(b) }
+    for (const e of edges) { add(fwd, e.fromKey, e.toKey); add(bwd, e.toKey, e.fromKey) }
+    return { fwd, bwd }
+  }, [edges])
+  const connectedSet = useMemo(() => {
+    if (hoveredKey === null) return null
+    const closure = (start: string[], adj: Map<string, Set<string>>, seed: Set<string>) => {
+      const seen = seed
+      const stack = [...start]
+      while (stack.length) {
+        const k = stack.pop()!
+        for (const n of adj.get(k) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n) }
+      }
+      return seen
+    }
+    const down = closure([hoveredKey], fwd, new Set([hoveredKey])) // descendants + self
+    return closure([...down], bwd, new Set(down))                  // + all their ancestors
+  }, [hoveredKey, fwd, bwd])
+
   // Layout math lives in ./chainLayout (pure). These thin closures bind the
   // current node set so call sites stay terse.
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
@@ -668,7 +695,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
           </defs>
           {arrows.map((a, i) => {
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
-            const connected = hoveredKey === null || a.fromKey === hoveredKey || a.toKey === hoveredKey
+            const connected = connectedSet === null || (connectedSet.has(a.fromKey) && connectedSet.has(a.toKey))
             const opacity = a.ghost ? 0.55 : isOrphaned ? 0.18 : connected ? 1 : 0.08
             const dashArray = a.ghost ? '4 6' : '6 4'
             return (
@@ -706,9 +733,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               x={pos.x}
               y={pos.y}
               hovered={hoveredKey === node.key}
-              dimmed={hoveredKey !== null && hoveredKey !== node.key &&
-                !arrows.some(a => (a.fromKey === hoveredKey && a.toKey === node.key) ||
-                                  (a.toKey === hoveredKey && a.fromKey === node.key))}
+              dimmed={connectedSet !== null && !connectedSet.has(node.key)}
               borderColor={node.suggested ? '#4ab095' : (charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])}
               charColorByCharId={charColorByCharId}
               onHover={setHoveredKey}
