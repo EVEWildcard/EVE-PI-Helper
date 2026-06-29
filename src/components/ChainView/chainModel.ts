@@ -33,7 +33,7 @@
 
 import type { StoredCharacter, Planet } from '../../types/api'
 import {
-  PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT,
+  PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT, ALL_SCHEMATICS,
   type PITier, type PIProduct,
 } from '../../data/schematics'
 
@@ -65,6 +65,12 @@ export interface TerminalChain {
   bottleneck?: { name: string; ratio: number }  // scarcest produced input limiting throughput
   upstreamProducts: string[]   // produced product names feeding this terminal (excl. itself)
   producerKeys: string[]       // planets producing the terminal product
+  // "Just sell the inputs instead of producing this" — when the direct inputs are
+  // worth more per hour at market than the finished product. deltaIskHr > 0.
+  sellInstead?: { deltaIskHr: number; toSell: string[] }
+  // "You could lengthen this chain to a higher PX" — a valid recipe consumes this
+  // product and you have spare planet slots. Opportunity, not a full plan.
+  canExtend?: { toProduct: string; toTier: PITier }
 }
 
 export interface ChainModel {
@@ -169,6 +175,23 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     else f.status = 'ok'
   }
 
+  // For "can-extend": which products consume each product as a direct input.
+  const consumersByInput = new Map<number, number[]>()
+  for (const sch of ALL_SCHEMATICS) {
+    for (const inp of sch.inputs) {
+      const arr = consumersByInput.get(inp.typeId) ?? []
+      arr.push(sch.output.typeId)
+      consumersByInput.set(inp.typeId, arr)
+    }
+  }
+  // Spare planet capacity across the empire (free slots + colonized-but-empty planets).
+  let totalSpareSlots = 0
+  for (const char of characters) {
+    const maxPlanets = 1 + (char.piSkills?.interplanetaryConsolidation ?? 0)
+    const empty = char.planets.filter(p => (p.outputs?.length ?? 0) === 0).length
+    totalSpareSlots += Math.max(0, maxPlanets - char.planets.length) + empty
+  }
+
   // Terminals = produced products nothing else you produce consumes.
   const terminals: TerminalChain[] = []
   for (const tid of producedTypeIds) {
@@ -201,6 +224,39 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     const price = prices[tid] ?? 0
     const s = supply.get(tid) ?? 0
     const frac = rFrac.get(tid) ?? 1
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
+
+    // Sell-instead: would the direct inputs fetch more per hour than the output?
+    let sellInstead: TerminalChain['sellInstead']
+    if (sch && price > 0) {
+      const runsHr = sch.output.quantity > 0 ? s / sch.output.quantity : 0
+      let inputsValueHr = 0
+      let allPriced = true
+      const toSell: string[] = []
+      for (const inp of sch.inputs) {
+        const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
+        if (!ip || ip.tier === 'P0') continue  // P0 has no relevant market sell value here
+        const ipPrice = prices[inp.typeId] ?? 0
+        if (!ipPrice) { allPriced = false; break }
+        inputsValueHr += inp.quantity * runsHr * ipPrice
+        toSell.push(ip.name)
+      }
+      const outputValueHr = s * price
+      if (allPriced && inputsValueHr > outputValueHr) {
+        sellInstead = { deltaIskHr: inputsValueHr - outputValueHr, toSell }
+      }
+    }
+
+    // Can-extend: a higher-tier recipe consumes this product and you have spare slots.
+    let canExtend: TerminalChain['canExtend']
+    if (prod.tier !== 'P4' && totalSpareSlots > 0) {
+      const candidate = (consumersByInput.get(tid) ?? [])
+        .map(outTid => PRODUCT_BY_TYPE_ID.get(outTid))
+        .filter((p): p is PIProduct => !!p && TIER_RANK[p.tier] > TIER_RANK[prod.tier])
+        .sort((a, b) => (prices[b.typeId] ?? 0) - (prices[a.typeId] ?? 0))[0]
+      if (candidate) canExtend = { toProduct: candidate.name, toTier: candidate.tier }
+    }
+
     terminals.push({
       product: prod,
       price,
@@ -212,6 +268,8 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       bottleneck,
       upstreamProducts: [...upstream].map(t => PRODUCT_BY_TYPE_ID.get(t)!.name),
       producerKeys: producerKeys.get(tid) ?? [],
+      ...(sellInstead ? { sellInstead } : {}),
+      ...(canExtend ? { canExtend } : {}),
     })
   }
 

@@ -96,6 +96,22 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
                 {health === 'noprice' && (
                   <span className={`${styles.pill} ${styles.pillMuted}`}>no market price</span>
                 )}
+                {t.canExtend && (
+                  <span
+                    className={`${styles.pill} ${styles.pillExtend}`}
+                    title={`A higher-tier recipe (${t.canExtend.toProduct}) uses this product and you have spare planet slots`}
+                  >
+                    ↗ Extend → {t.canExtend.toTier} {t.canExtend.toProduct}
+                  </span>
+                )}
+                {t.sellInstead && (
+                  <span
+                    className={`${styles.pill} ${styles.pillSell}`}
+                    title={`Selling ${t.sellInstead.toSell.join(' + ')} at market beats producing ${t.product.name} by ≈ ${formatIsk(t.sellInstead.deltaIskHr)}/hr`}
+                  >
+                    💰 Sell inputs +{formatIsk(t.sellInstead.deltaIskHr)}/hr
+                  </span>
+                )}
               </div>
 
               <div className={styles.iskCol}>

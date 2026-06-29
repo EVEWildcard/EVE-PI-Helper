@@ -142,6 +142,9 @@
 
 .statusCol {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -159,6 +162,8 @@
 .pillBottleneck { color: #c8a030; background: rgba(200,160,48,0.10); border: 1px solid rgba(200,160,48,0.35); }
 .pillOk         { color: #4ab095; background: rgba(74,176,149,0.10); border: 1px solid rgba(74,176,149,0.30); }
 .pillMuted      { color: var(--text-muted); background: transparent; border: 1px dashed var(--border); }
+.pillExtend     { color: #4a90c8; background: rgba(74,144,200,0.10);  border: 1px solid rgba(74,144,200,0.35); }
+.pillSell       { color: #c8a030; background: rgba(200,160,48,0.10); border: 1px solid rgba(200,160,48,0.30); }
 
 .iskCol {
   display: flex;
