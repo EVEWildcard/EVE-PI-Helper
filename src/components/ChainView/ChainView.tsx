@@ -84,6 +84,7 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
         focusTitle={title}
         suggestionsAllowed={false}
         singleChain
+        onSeeEverything={() => { setFocusTypeId(null); go('graph') }}
       />
     )
   }

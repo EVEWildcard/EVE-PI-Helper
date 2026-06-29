@@ -288,6 +288,8 @@ interface Props {
   /** Single-chain (focus) view: always alt-colored, and hover highlights the
    *  path THROUGH a node (ancestors ∪ descendants) rather than the whole chain. */
   singleChain?: boolean
+  /** When provided, a "See everything" button is shown (jump to the full graph). */
+  onSeeEverything?: () => void
 }
 
 function formatIsk(isk: number): string {
@@ -297,7 +299,7 @@ function formatIsk(isk: number): string {
   return isk.toFixed(0)
 }
 
-export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 'Back', focusTitle, suggestionsAllowed = true, singleChain = false }: Props) {
+export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 'Back', focusTitle, suggestionsAllowed = true, singleChain = false, onSeeEverything }: Props) {
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   // keyed by `${nodeKey}:${inputName}` → center-x of the chip in CSS canvas space
   const inputChipRefs = useRef<Map<string, HTMLSpanElement>>(new Map())
@@ -698,6 +700,11 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             ← {backLabel}
           </button>
         )}
+        {onSeeEverything && (
+          <button className={styles.dirBtn} onClick={onSeeEverything} title="Render the full combined production graph">
+            See everything <span style={{ fontSize: 14 }}>⊞</span>
+          </button>
+        )}
         {focusTitle && <span className={styles.focusTitle}>{focusTitle}</span>}
         {suggestionsAllowed && (
           <button
@@ -720,8 +727,18 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             Max skills
           </label>
         )}
+      </div>
+
+      <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>
+        {isNarrow && (
+          <div className={styles.mobileHint}>
+            Drag to pan · the production chain is best viewed on a wider screen
+          </div>
+        )}
+        {/* Warnings column — pinned right; hover a row to locate it in the graph. */}
         {balanceHints.length > 0 && (
-          <div className={styles.balanceHints}>
+          <div className={styles.warningsPanel}>
+            <div className={styles.warningsTitle}>Issues · {balanceHints.length}</div>
             {balanceHints.map((hint, idx) => {
               const isBottleneck = hint.type === 'bottleneck'
               return (
@@ -731,7 +748,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                   onMouseEnter={() => setWarnProduct(hint.productName)}
                   onMouseLeave={() => setWarnProduct(null)}
                   title={isBottleneck
-                    ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. Hover to locate it in the graph; consider adding another extractor.`
+                    ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. Hover to locate it; consider adding another extractor.`
                     : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. Hover to locate it; consider repurposing an extractor.`
                   }
                 >
@@ -742,14 +759,6 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                 </div>
               )
             })}
-          </div>
-        )}
-      </div>
-
-      <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>
-        {isNarrow && (
-          <div className={styles.mobileHint}>
-            Drag to pan · the production chain is best viewed on a wider screen
           </div>
         )}
         {/* Tier band labels — outside canvasInner, pinned to canvas left, Y converted to visual coords */}
