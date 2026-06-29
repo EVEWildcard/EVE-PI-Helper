@@ -56,6 +56,14 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
       </div>
 
       <div className={styles.list}>
+        {/* Teaching is gated on spatial room: a sparse list has space to explain. */}
+        {terminals.length > 0 && terminals.length <= 4 && (
+          <div className={styles.teach}>
+            <p>Each row is a <strong>chain</strong> — an end product you sell — ranked by ISK/hr.</p>
+            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> at full. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an input can’t keep up — the % is how much of full speed you’re running. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it.</p>
+            <p>Click a chain to open just its graph; <strong>See everything</strong> shows the whole empire.</p>
+          </div>
+        )}
         {terminals.length === 0 && (
           <div className={styles.empty}>No end products yet — assign outputs to your planets in Setup.</div>
         )}

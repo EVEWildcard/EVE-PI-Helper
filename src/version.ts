@@ -1,3 +1,3 @@
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '2.0.0'
 
-export const LATEST_CHANGE = 'v1.7.0 — Bug reports include an anonymized snapshot of your PI setup'
+export const LATEST_CHANGE = 'v2.0.0 — Production Chain rework: ISK-ranked chain list, click to focus a chain, “See everything” full graph'
