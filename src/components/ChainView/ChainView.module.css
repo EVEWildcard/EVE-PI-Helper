@@ -34,6 +34,16 @@
   transition: color 0.1s, border-color 0.1s, background 0.1s;
 }
 .dirBtn:hover { color: var(--text-primary); border-color: var(--border); }
+
+.focusTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-right: 4px;
+}
 .dirBtnActive {
   color: var(--accent);
   border-color: var(--accent);
