@@ -285,6 +285,9 @@ interface Props {
   focusTitle?: React.ReactNode
   /** Focus view turns suggestions off to keep the single chain clean. */
   suggestionsAllowed?: boolean
+  /** Single-chain (focus) view: always alt-colored, and hover highlights the
+   *  path THROUGH a node (ancestors ∪ descendants) rather than the whole chain. */
+  singleChain?: boolean
 }
 
 function formatIsk(isk: number): string {
@@ -294,7 +297,7 @@ function formatIsk(isk: number): string {
   return isk.toFixed(0)
 }
 
-export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 'Back', focusTitle, suggestionsAllowed = true }: Props) {
+export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 'Back', focusTitle, suggestionsAllowed = true, singleChain = false }: Props) {
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   // keyed by `${nodeKey}:${inputName}` → center-x of the chip in CSS canvas space
   const inputChipRefs = useRef<Map<string, HTMLSpanElement>>(new Map())
@@ -324,6 +327,8 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   // center-x of each input chip in CSS canvas space, keyed `${nodeKey}:${inputName}`
   const [inputChipCX, setInputChipCX] = useState<Map<string, number>>(new Map())
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
+  // Set while hovering a balance-warning chip → locates the responsible nodes.
+  const [warnProduct, setWarnProduct] = useState<string | null>(null)
   const [altHeld, setAltHeld] = useState(false)
   useEffect(() => {
     const down = (e: KeyboardEvent) => { if (e.key === 'Alt') setAltHeld(true) }
@@ -470,6 +475,11 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     return m
   }, [nodes])
 
+  // Past ~4 alts the per-alt rainbow is just noise: color the whole graph by
+  // product TIER and swap the legend for a stats line. Hovering a chain still
+  // reveals its alts' colors. The single-chain focus view always stays alt-colored.
+  const manyAlts = !singleChain && charColorByCharId.size > 4
+
   // Productive nodes + terminal label per node (color now comes from charColorByCharId)
   const { productiveNodes, terminalColorByNode, nodeTerminal, terminalNameByKey } = useMemo(() => {
     const tierRank: Record<string, number> = { P1: 1, P2: 2, P3: 3, P4: 4 }
@@ -547,9 +557,15 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
       }
       return seen
     }
+    if (singleChain) {
+      // Path THROUGH the node: its ancestors plus its descendants (no siblings),
+      // so hovering a mid node in a one-chain view actually narrows the focus.
+      const up = closure([hoveredKey], bwd, new Set([hoveredKey]))
+      return closure([hoveredKey], fwd, up)
+    }
     const down = closure([hoveredKey], fwd, new Set([hoveredKey])) // descendants + self
     return closure([...down], bwd, new Set(down))                  // + all their ancestors
-  }, [hoveredKey, fwd, bwd])
+  }, [hoveredKey, fwd, bwd, singleChain])
 
   // Layout math lives in ./chainLayout (pure). These thin closures bind the
   // current node set so call sites stay terse.
@@ -594,14 +610,16 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     }
   }, [nodes, containerW])
 
-  // Pass 2: draw arrows after positions are settled
+  // Pass 2: draw arrows after positions are settled. At scale, pass an empty
+  // color map so arrows fall back to TIER colors; otherwise color by alt.
   useLayoutEffect(() => {
     if (nodes.length === 0 || nodePos.size === 0 || nodeSizes.size === 0) return
+    const colorMap = manyAlts ? new Map<string, string>() : terminalColorByNode
     const { arrows: newArrows, svgSize: newSvgSize } =
-      computeArrows(nodes, edges, nodePos, nodeSizes, { terminalColorByNode, tierColor: TIER_COLOR })
+      computeArrows(nodes, edges, nodePos, nodeSizes, { terminalColorByNode: colorMap, tierColor: TIER_COLOR })
     setSvgSize(newSvgSize)
     setArrows(newArrows)
-  }, [nodes, edges, nodePos, nodeSizes, terminalColorByNode, inputChipCX])
+  }, [nodes, edges, nodePos, nodeSizes, terminalColorByNode, inputChipCX, manyAlts])
 
   if (characters.length === 0) {
     return <div className={styles.empty}>Set up your characters first to see the production chain.</div>
@@ -611,6 +629,64 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   }
 
   const activeCols = ([0, 1, 2, 3] as const).filter(i => nodes.some(n => n.column === i))
+
+  // Products with a balance problem → their arrows render dotted (vs solid healthy).
+  const problemProducts = new Set(balanceHints.map(h => h.productName))
+
+  // Warning-chip hover → the nodes that make or consume that product.
+  const warnKeys: Set<string> | null = warnProduct
+    ? new Set(nodes.filter(n =>
+        n.outputNames.includes(warnProduct) || n.inputNames.includes(warnProduct) ||
+        (n.isCluster ? !!n.clusterMembers?.some(m => m.outputNames.includes(warnProduct)) : false)
+      ).map(n => n.key))
+    : null
+
+  // What's currently emphasized — a hovered warning wins over a hovered node.
+  const highlight = warnKeys ?? connectedSet
+
+  // Alt color for a node key (node border tint + hovered-chain arrow tint at scale).
+  const altColorOf = (key: string): string | undefined => {
+    const n = nodes.find(nn => nn.key === key)
+    return n ? (charColorByCharId.get(n.characterId) ?? TIER_COLOR[n.outputTier]) : undefined
+  }
+
+  // Alts touched by the current highlight (for the at-scale legend on hover).
+  const altsInHighlight: StoredCharacter[] = highlight
+    ? (() => {
+        const ids = new Set<number>()
+        for (const n of nodes) {
+          if (!highlight.has(n.key)) continue
+          if (n.isCluster) n.clusterMembers?.forEach(m => ids.add(m.characterId))
+          else if (n.characterId > 0) ids.add(n.characterId)
+        }
+        return characters.filter(c => ids.has(c.characterId))
+      })()
+    : []
+
+  const renderAltRows = (list: StoredCharacter[]) =>
+    list.slice()
+      .sort((a, b) => (b.piSkills.interplanetaryConsolidation - a.piSkills.interplanetaryConsolidation) || (b.planets.length - a.planets.length))
+      .map(c => {
+        const color = charColorByCharId.get(c.characterId)
+        if (!color) return null
+        return (
+          <div key={c.characterId} className={styles.legendRow}>
+            <span className={styles.legendDot} style={{ background: color }} />
+            <span className={styles.legendName}>{c.characterName}</span>
+          </div>
+        )
+      })
+
+  // Empire stats for the at-scale summary that replaces the rainbow legend.
+  const empireStats = (() => {
+    let planets = 0, extractors = 0, factories = 0
+    for (const c of characters) for (const p of c.planets) {
+      planets++
+      const tiers = p.outputTiers ?? []
+      if (tiers.length === 0 || tiers.every(t => t === 'P1')) extractors++; else factories++
+    }
+    return { planets, extractors, factories, alts: characters.filter(c => c.planets.length > 0).length }
+  })()
 
   return (
     <>
@@ -644,27 +720,30 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             Max skills
           </label>
         )}
-        {balanceHints.length > 0 && (() => {
-          const hint = balanceHints[0]
-          const isBottleneck = hint.type === 'bottleneck'
-          return (
-            <div
-              className={styles.balanceHint}
-              title={isBottleneck
-                ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. Consider adding another extractor.`
-                : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. Consider repurposing an extractor.`
-              }
-            >
-              <span className={styles.balanceHintIcon}>{isBottleneck ? '⚡' : '〰'}</span>
-              <span className={styles.balanceHintText}>
-                {isBottleneck
-                  ? <><strong>{hint.productName}</strong> is a bottleneck <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span></>
-                  : <><strong>{hint.productName}</strong> overproduced <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span></>
-                }
-              </span>
-            </div>
-          )
-        })()}
+        {balanceHints.length > 0 && (
+          <div className={styles.balanceHints}>
+            {balanceHints.map((hint, idx) => {
+              const isBottleneck = hint.type === 'bottleneck'
+              return (
+                <div
+                  key={`${hint.productName}-${idx}`}
+                  className={`${styles.balanceHint} ${warnProduct === hint.productName ? styles.balanceHintActive : ''}`}
+                  onMouseEnter={() => setWarnProduct(hint.productName)}
+                  onMouseLeave={() => setWarnProduct(null)}
+                  title={isBottleneck
+                    ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. Hover to locate it in the graph; consider adding another extractor.`
+                    : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. Hover to locate it; consider repurposing an extractor.`
+                  }
+                >
+                  <span className={styles.balanceHintIcon}>{isBottleneck ? '⚡' : '〰'}</span>
+                  <span className={styles.balanceHintText}>
+                    <strong>{hint.productName}</strong> {isBottleneck ? 'bottleneck' : 'overproduced'} <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>
@@ -695,22 +774,28 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
           </defs>
           {arrows.map((a, i) => {
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
-            const connected = connectedSet === null || (connectedSet.has(a.fromKey) && connectedSet.has(a.toKey))
+            const connected = highlight === null || (highlight.has(a.fromKey) && highlight.has(a.toKey))
             const opacity = a.ghost ? 0.55 : isOrphaned ? 0.18 : connected ? 1 : 0.08
-            const dashArray = a.ghost ? '4 6' : '6 4'
+            // Solid = healthy, dotted = the product has a balance problem.
+            const problem = !a.ghost && a.label.split(', ').some(n => problemProducts.has(n))
+            const dashArray = a.ghost ? '4 6' : problem ? '2 5' : '0'
+            // At scale the base color is the tier; tint the highlighted chain by alt.
+            const stroke = (manyAlts && highlight !== null && connected && !a.ghost)
+              ? (altColorOf(a.fromKey) ?? a.color)
+              : a.color
             return (
               <g key={i} style={{ transition: 'opacity 0.15s' }} opacity={opacity}>
-                <path d={a.d} fill="none" stroke={a.color} strokeWidth={connected && hoveredKey ? 2.5 : 1.5}
-                  strokeOpacity={connected ? (a.ghost ? 0.6 : 0.75) : 0.5}
-                  strokeDasharray={dashArray} color={a.color} markerEnd="url(#arrowhead)"
-                  className={styles.arrowPath} />
+                <path d={a.d} fill="none" stroke={stroke} strokeWidth={connected && highlight ? 2.5 : 1.5}
+                  strokeOpacity={connected ? (a.ghost ? 0.6 : 0.8) : 0.5}
+                  strokeDasharray={dashArray} color={stroke} markerEnd="url(#arrowhead)"
+                  className={styles.arrowPath} style={{ transition: 'stroke 0.25s, stroke-width 0.15s' }} />
                 {(altHeld || (hoveredKey !== null && connected)) && !a.ghost && (
                   <>
                     <rect x={a.labelX - a.label.length * 3.2 - 6} y={a.labelY - 10}
                       width={a.label.length * 6.4 + 12} height={14}
                       rx={4} fill="var(--bg-deep)" opacity={0.85} />
                     <text x={a.labelX} y={a.labelY} textAnchor="middle"
-                      fill={a.color} fontSize={10} fontWeight={700}
+                      fill={stroke} fontSize={10} fontWeight={700}
                       style={{ userSelect: 'none', fontFamily: 'var(--font)' }}>
                       {a.label}
                     </text>
@@ -733,8 +818,13 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               x={pos.x}
               y={pos.y}
               hovered={hoveredKey === node.key}
-              dimmed={connectedSet !== null && !connectedSet.has(node.key)}
-              borderColor={node.suggested ? '#4ab095' : (charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])}
+              dimmed={highlight !== null && !highlight.has(node.key)}
+              borderColor={
+                node.suggested ? '#4ab095'
+                : (manyAlts && !(highlight?.has(node.key)))
+                  ? TIER_COLOR[node.outputTier]
+                  : (charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])
+              }
               charColorByCharId={charColorByCharId}
               onHover={setHoveredKey}
               onSelectSuggestion={setSelectedSuggestion}
@@ -749,23 +839,26 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
           )
         })}
         </div>
-        {/* Character color legend — hidden on narrow screens where it overlaps
-            the graph; node borders still carry each character's color. */}
+        {/* Legend (bottom-right, above the templates button). At small scale it's
+            the per-alt color key; past ~4 alts that's a rainbow, so we show a
+            stats summary instead and reveal just the hovered chain's alts. */}
         {characters.length > 0 && !isNarrow && (
           <div className={styles.legend}>
-            {characters.slice().sort((a, b) =>
-              (b.piSkills.interplanetaryConsolidation - a.piSkills.interplanetaryConsolidation) ||
-              (b.planets.length - a.planets.length)
-            ).map(c => {
-              const color = charColorByCharId.get(c.characterId)
-              if (!color) return null
-              return (
-                <div key={c.characterId} className={styles.legendRow}>
-                  <span className={styles.legendDot} style={{ background: color }} />
-                  <span className={styles.legendName}>{c.characterName}</span>
-                </div>
-              )
-            })}
+            {!manyAlts ? (
+              renderAltRows(characters)
+            ) : highlight && altsInHighlight.length > 0 ? (
+              <>
+                <div className={styles.legendTitle}>This chain</div>
+                {renderAltRows(altsInHighlight)}
+              </>
+            ) : (
+              <div className={styles.legendStats}>
+                <div className={styles.legendStatBig}>{empireStats.alts} alts</div>
+                <div>{empireStats.planets} planets</div>
+                <div>{empireStats.extractors} extractors · {empireStats.factories} factories</div>
+                <div className={styles.legendHint}>colored by tier · hover a chain for alts</div>
+              </div>
+            )}
           </div>
         )}
         <TemplateSearch />

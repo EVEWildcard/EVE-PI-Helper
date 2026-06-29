@@ -83,6 +83,7 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
         backLabel="All chains"
         focusTitle={title}
         suggestionsAllowed={false}
+        singleChain
       />
     )
   }

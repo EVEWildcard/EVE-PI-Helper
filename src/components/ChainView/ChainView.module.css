@@ -416,6 +416,16 @@
   margin-left: 4px;
 }
 
+.balanceHints {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
 .balanceHint {
   display: flex;
   align-items: center;
@@ -424,8 +434,14 @@
   border-radius: 6px;
   background: rgba(224, 160, 48, 0.08);
   border: 1px solid rgba(224, 160, 48, 0.25);
-  cursor: help;
+  cursor: pointer;
+  flex-shrink: 0;
   max-width: 280px;
+  transition: background 0.1s, border-color 0.1s;
+}
+.balanceHint:hover, .balanceHintActive {
+  background: rgba(224, 160, 48, 0.18);
+  border-color: rgba(224, 160, 48, 0.55);
 }
 
 .balanceHintIcon {
@@ -591,8 +607,8 @@
 
 .legend {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 64px;       /* sits just above the bottom-right templates button */
+  right: 16px;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -602,7 +618,29 @@
   padding: 8px 10px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.35);
   pointer-events: none;
+  max-height: 60%;
+  overflow-y: auto;
 }
+
+.legendTitle {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.legendStats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.legendStatBig { font-size: 13px; font-weight: 800; color: var(--text-primary); }
+.legendHint { font-size: 9px; color: var(--text-muted); margin-top: 3px; }
 
 .legendRow {
   display: flex;
