@@ -785,16 +785,23 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
             const connected = highlight === null || (highlight.has(a.fromKey) && highlight.has(a.toKey))
             const opacity = a.ghost ? 0.55 : isOrphaned ? 0.18 : connected ? 1 : 0.08
-            // Solid = healthy, dotted = the product has a balance problem.
+            // Healthy arrows keep the marching dashed flow (reads as "flowing");
+            // issue arrows go SOLID + a touch wider with a pulsing red backdrop so
+            // the problem grabs the eye instead of fading into a thin dotted line.
             const problem = !a.ghost && a.label.split(', ').some(n => problemProducts.has(n))
-            const dashArray = a.ghost ? '4 6' : problem ? '2 5' : '0'
+            const dashArray = a.ghost ? '4 6' : problem ? '0' : '6 4'
+            const baseWidth = connected && highlight ? 2.5 : 1.5
+            const strokeWidth = problem ? baseWidth + 1 : baseWidth
             // At scale the base color is the tier; tint the highlighted chain by alt.
             const stroke = (manyAlts && highlight !== null && connected && !a.ghost)
               ? (altColorOf(a.fromKey) ?? a.color)
               : a.color
             return (
               <g key={i} style={{ transition: 'opacity 0.15s' }} opacity={opacity}>
-                <path d={a.d} fill="none" stroke={stroke} strokeWidth={connected && highlight ? 2.5 : 1.5}
+                {problem && (
+                  <path d={a.d} fill="none" stroke="#ff4d4d" className={styles.issueBackdrop} />
+                )}
+                <path d={a.d} fill="none" stroke={stroke} strokeWidth={strokeWidth}
                   strokeOpacity={connected ? (a.ghost ? 0.6 : 0.8) : 0.5}
                   strokeDasharray={dashArray} color={stroke} markerEnd="url(#arrowhead)"
                   className={styles.arrowPath} style={{ transition: 'stroke 0.25s, stroke-width 0.15s' }} />

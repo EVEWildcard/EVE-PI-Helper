@@ -150,6 +150,18 @@
   to   { stroke-dashoffset: 0; }
 }
 
+/* Issue arrows: a wider, pulsing red glow rendered BEHIND the solid connector to
+   pull the eye toward a balance problem (vs. the healthy marching-dash flow). */
+.issueBackdrop {
+  stroke-linecap: round;
+  animation: issuePulse 1.3s ease-in-out infinite;
+}
+
+@keyframes issuePulse {
+  0%, 100% { opacity: 0.2;  stroke-width: 5px; }
+  50%      { opacity: 0.55; stroke-width: 10px; }
+}
+
 /* ── Node ── */
 
 .node {
@@ -625,8 +637,8 @@
 
 .legend {
   position: absolute;
-  bottom: 64px;       /* sits just above the bottom-right templates button */
-  right: 16px;
+  bottom: 16px;       /* bottom-left — clears the templates FAB (bottom-right) */
+  left: 16px;
   display: flex;
   flex-direction: column;
   gap: 5px;
