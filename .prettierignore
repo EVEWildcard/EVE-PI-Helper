@@ -1,0 +1,11 @@
+# Build output / deps
+dist
+out
+node_modules
+*.tsbuildinfo
+package-lock.json
+
+# Hand-aligned static data tables — the column alignment is deliberate and readable;
+# don't let Prettier collapse it.
+src/data/schematics.ts
+src/data/planetResources.ts

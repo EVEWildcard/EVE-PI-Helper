@@ -3,6 +3,7 @@ import type { StoredCharacter, Planet } from '../../types/api'
 import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME, ALL_SCHEMATICS, PRODUCT_BY_TYPE_ID } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
+import { validateDeliveryUsage } from './validateDeliveryUsage'
 import styles from './HaulPlan.module.css'
 
 // output name → its inputs with per-cycle quantities (all factory cycles are 1h,
@@ -124,7 +125,7 @@ interface ResetItem { planet: Planet; p1s: string[]; urgency: Urgency }
 interface DepositSplit { name: string; share: number }
 interface DepositItem { material: string; tier: string; toNames: string[]; splits?: DepositSplit[] }
 
-interface AltStep {
+export interface AltStep {
   id: string          // unique per step (an alt can appear twice: primary + return visit)
   char: StoredCharacter
   isReturn?: boolean   // a return visit to finish deliveries that were waiting on a later alt
@@ -167,7 +168,7 @@ export function deriveLoginOrder(characters: StoredCharacter[], now: number): nu
     .map(c => c.characterId)
 }
 
-function computeSteps(characters: StoredCharacter[], now: number, orderIds?: number[]): AltStep[] {
+export function computeSteps(characters: StoredCharacter[], now: number, orderIds?: number[]): AltStep[] {
   // ── indexes ──
   const producedByChar = new Map<number, Set<string>>()
   const producerCharsByMaterial = new Map<string, Set<number>>()
@@ -470,6 +471,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
 
   const steps = useMemo(() => computeSteps(characters, now, frozenOrder), [characters, now, frozenOrder])
   const readyAt = useMemo(() => findReadyAt(characters), [characters])
+
+  // Dev-only guard: surface any delivery↔usage mismatch (an alt told to leave a
+  // material nobody downstream consumes, or an input with no deposit feeding it).
+  // Tree-shaken out of production builds; the invariant is also covered by tests.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const violations = validateDeliveryUsage(steps)
+    if (violations.length)
+      console.warn('[HaulPlan] delivery↔usage mismatch:', violations.map(v => v.message))
+  }, [steps])
 
   // material → (receiving alt name → its share) for split deposits. Lets a
   // receiving alt be reminded to grab only ITS half of a shared-container drop.
