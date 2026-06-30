@@ -15,7 +15,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24 ships npm 11, which matches the npm that generates our
+          # package-lock.json. Node 20/22 ship npm 10, whose `npm ci` rejects
+          # the lockfile's esbuild optional-deps as "Missing from lock file".
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
