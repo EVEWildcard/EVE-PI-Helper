@@ -341,6 +341,58 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     window.addEventListener('resize', measure)
     return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
   }, [])
+
+  // View transform: pan (tx,ty in screen px) + zoom. `null` = auto-fit (the
+  // original behavior — small graphs look identical). Once the user wheels or
+  // drags we hold their view until they hit "Fit". Refs mirror the applied view
+  // + fit so the native wheel/pointer handlers (attached once) read fresh values
+  // without re-binding. Disabled on narrow screens, which keep the scroll path.
+  type View = { tx: number; ty: number; zoom: number }
+  const [view, setView] = useState<View | null>(null)
+  const viewRef = useRef<View>({ tx: 0, ty: 0, zoom: 1 })
+  const narrowRef = useRef(false)
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const clampZoom = (z: number) => Math.max(0.04, Math.min(2, z))
+    const onWheel = (e: WheelEvent) => {
+      if (narrowRef.current) return
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top
+      const cur = viewRef.current
+      const nz = clampZoom(cur.zoom * Math.exp(-e.deltaY * 0.0015))
+      // keep the canvas point under the cursor fixed while zooming
+      const cx = (mx - cur.tx) / cur.zoom, cy = (my - cur.ty) / cur.zoom
+      setView({ zoom: nz, tx: mx - cx * nz, ty: my - cy * nz })
+    }
+    let dragging = false, sx = 0, sy = 0, sv = viewRef.current
+    const onDown = (e: PointerEvent) => {
+      if (narrowRef.current || e.button !== 0) return
+      // don't hijack clicks on the legend / panels / their controls
+      if ((e.target as HTMLElement)?.closest('button, input, a, [role="button"]')) return
+      dragging = true; sx = e.clientX; sy = e.clientY; sv = viewRef.current
+      el.setPointerCapture?.(e.pointerId)
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!dragging) return
+      setView({ zoom: sv.zoom, tx: sv.tx + (e.clientX - sx), ty: sv.ty + (e.clientY - sy) })
+    }
+    const onUp = (e: PointerEvent) => { dragging = false; el.releasePointerCapture?.(e.pointerId) }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
+
   const [arrows, setArrows] = useState<ArrowPath[]>([])
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
   const [nodePos, setNodePos] = useState<Map<string, { x: number; y: number }>>(new Map())
@@ -519,12 +571,20 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const { isNarrow, scale } = computeScale(containerW, containerH, totalW, totalH)
 
+  // Applied view: the user's pan/zoom when set (wide screens only), else auto-fit
+  // (centered horizontally, top-aligned) — identical to the original behavior.
+  const fitView = { tx: Math.max(0, (containerW - totalW * scale) / 2), ty: 0, zoom: scale }
+  const v = (!isNarrow && view) ? view : fitView
+  viewRef.current = v
+  narrowRef.current = isNarrow
+
   // Pass 1: measure actual node sizes → compute real positions
   useLayoutEffect(() => {
     if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setArrows([]); return }
 
-    // getBoundingClientRect returns screen pixels (post-scale); divide by scale to get CSS pixels
-    const { scale: currentScale } = computeScale(containerW, containerH, totalW, totalH)
+    // getBoundingClientRect returns screen pixels (post-zoom); divide by the
+    // currently-applied zoom to recover CSS pixels (sizes are zoom-invariant).
+    const currentScale = viewRef.current.zoom
 
     const sizes = new Map<string, { w: number; h: number }>()
     for (const node of nodes) {
@@ -683,6 +743,11 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             {systemPlanetsLoading && <span className={styles.suggestLoading}>…</span>}
           </label>
         )}
+        {!isNarrow && view && (
+          <button className={styles.dirBtn} onClick={() => setView(null)} title="Reset zoom & pan to fit the whole graph">
+            Fit · {Math.round(v.zoom * 100)}%
+          </button>
+        )}
       </div>
 
       <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>
@@ -766,7 +831,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         {activeCols.slice().reverse().map(i => {
           const pos = nodePos.get(nodes.find(n => n.column === i)?.key ?? '')
           const canvasY = pos?.y ?? vEstColY(i)
-          const top = canvasY * scale
+          const top = canvasY * v.zoom + v.ty
           return (
             <div key={i} className={styles.rowHeader} style={{ top }}>
               <span className={styles.colTier} style={{ color: TIER_COLOR[`P${i + 1}` as PITier] }}>P{i + 1}</span>
@@ -774,7 +839,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             </div>
           )
         })}
-        <div ref={canvasInnerRef} className={styles.canvasInner} style={{ width: totalW, minHeight: totalH, transform: `translateX(${Math.max(0, (containerW - totalW * scale) / 2)}px) scale(${scale})`, transformOrigin: 'top left' }}>
+        <div ref={canvasInnerRef} className={styles.canvasInner} style={{ width: totalW, minHeight: totalH, transform: `translate(${v.tx}px, ${v.ty}px) scale(${v.zoom})`, transformOrigin: 'top left' }}>
         <svg className={styles.svg} width={svgSize.w || totalW} height={svgSize.h || totalH}>
           <defs>
             <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
