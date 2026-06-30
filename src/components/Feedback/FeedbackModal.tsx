@@ -10,6 +10,9 @@ interface Props {
   screen: string
   characterCount: number
   onClose: () => void
+  /** Pre-fill the form (e.g. the "too many accounts" prompt opens it ready to send). */
+  initialMessage?: string
+  initialType?: FeedbackType
 }
 
 function buildMeta(screen: string, characterCount: number) {
@@ -24,9 +27,9 @@ function buildMeta(screen: string, characterCount: number) {
   }
 }
 
-export function FeedbackModal({ screen, characterCount, onClose }: Props) {
-  const [type, setType] = useState<FeedbackType>('bug')
-  const [message, setMessage] = useState('')
+export function FeedbackModal({ screen, characterCount, onClose, initialMessage, initialType }: Props) {
+  const [type, setType] = useState<FeedbackType>(initialType ?? 'bug')
+  const [message, setMessage] = useState(initialMessage ?? '')
   const [website, setWebsite] = useState('') // honeypot
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)

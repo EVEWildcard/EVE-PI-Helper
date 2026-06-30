@@ -24,22 +24,24 @@ import {
   SCHEMATIC_BY_OUTPUT, P0_TO_P1_SCHEMATICS, PLANET_RESOURCES, P4_PRODUCTS,
 } from '../data/schematics'
 import { type StoredCharacter, type Planet, type PISkillLevels } from '../types/api'
+import { MAX_ACCOUNTS, ALTS_PER_ACCOUNT, MAX_SUPPORTED_CHARACTERS } from '../capacity'
 
 const STORAGE_KEY = 'evepi.store'
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII']
 
-// EVE caps a character at 6 planets (Interplanetary Consolidation V: 1 + 5).
-// The dev "scale" slider runs from 1 planet up to the theoretical ceiling a
-// heavy multiboxer could reach — ~50 accounts × ~3 toons = ~150 toons × 6 = 900
-// planets. That's the graceful-degradation ceiling, NOT the design target
-// (~140 planets / ~24 toons stays genuinely usable — see roadmap memory).
+// EVE caps a character at 6 planets (Interplanetary Consolidation V: 1 + 5) and
+// an account at 3 characters. The dev "scale" slider is ACCOUNT-based (1..30):
+// each account runs all 3 alts, and the more accounts you have the likelier each
+// alt is fully skilled — at 30 accounts every alt is maxed (90 alts × 6 = 540
+// planets, the supported ceiling). The first alt of the first account is ALWAYS
+// maxed, so even a 1-account empire has one complete, fully-built chain.
 export const MAX_PLANETS_PER_ALT = 6
-export const MAX_ALTS = 150
-export const MAX_PLANETS = MAX_ALTS * MAX_PLANETS_PER_ALT // 900
-// Default local-testing empire: ~8 maxed alts / 48 planets — the documented
-// "real pain case" (≈ the user's screenshot) the readability rework targets.
-// Auto-seeded on a fresh dev store; the scale slider adjusts up/down from here.
-export const DEFAULT_DEV_PLANETS = 48
+export { MAX_ACCOUNTS, ALTS_PER_ACCOUNT }
+export const MAX_ALTS = MAX_SUPPORTED_CHARACTERS              // 90
+export const MAX_PLANETS = MAX_ALTS * MAX_PLANETS_PER_ALT     // 540
+// Default local-testing empire on a fresh dev store: a few accounts, mixed
+// skills. The scale slider adjusts up/down from here.
+export const DEFAULT_DEV_ACCOUNTS = 4
 // Fixed seed for the slider so empire(N) is a stable prefix-superset of
 // empire(N+1) — dragging grows ONE empire, and refactors verify against
 // reproducible data.
@@ -235,34 +237,53 @@ function facilityCounts(order: string[]): Map<string, number> {
 
 export interface EmpireStats { characters: number; planets: number; p4Products: string[] }
 
-/**
- * Build a random empire sized to roughly `targetChars` maxed characters.
- * Adds whole P4 chains until that many characters' worth of planets exist,
- * distributes them across characters (mixing tiers so most run both extractors
- * and factories), then tops every character up to 6 planets with redundant
- * extractors. Returns the roster plus a few stats for the caller to surface.
- */
-// Varied-but-realistic PI skills for alt #ci. Drawn from a PER-ALT seeded RNG
-// (independent of the main raws stream) so an alt's skills are deterministic and
-// stable as the empire grows. NOT all maxed: a producing alt is usually IC 4-5 /
-// CCU 4-5, occasionally lower. IC drives the planet cap (1 + IC).
-function skillsForAlt(ci: number): PISkillLevels {
-  const r = mulberry32((SLIDER_SEED ^ ((ci + 1) * 0x9e3779b1)) >>> 0)
+// All PI skills maxed — what a fully-trained alt looks like.
+const MAXED_SKILLS: PISkillLevels = {
+  interplanetaryConsolidation: 5,
+  commandCenterUpgrades:       5,
+  remoteSensing:               5,
+  planetology:                 5,
+  advancedPlanetology:         5,
+}
+
+// Each alt has a FIXED "maxed threshold" in [0,1), independent of empire size.
+// An alt is maxed once the empire's maxed-probability rises past its threshold —
+// so as you add accounts alts only ever flip unmaxed→maxed (never back), giving a
+// monotonic "the bigger the operation, the better-skilled the alts" progression.
+function altMaxThreshold(ti: number): number {
+  return mulberry32((SLIDER_SEED ^ ((ti + 1) * 0x9e3779b1)) >>> 0)()
+}
+
+// Probability any given alt is maxed at this account count: 0 at 1 account, 1 at
+// MAX_ACCOUNTS (everyone maxed). The first alt of the first account (ti 0) is
+// always maxed regardless, so there's always one complete chain to look at.
+function isAltMaxed(ti: number, accounts: number): boolean {
+  if (ti === 0) return true
+  const maxProb = accounts <= 1 ? 0 : (accounts - 1) / (MAX_ACCOUNTS - 1)
+  return altMaxThreshold(ti) < maxProb
+}
+
+// Skills for alt #ti at a given account count. Maxed alts get MAXED_SKILLS; the
+// rest get varied, lower, deterministic skills (a still-training alt). IC drives
+// the planet cap (1 + IC).
+function skillsForAlt(ti: number, accounts: number): PISkillLevels {
+  if (isAltMaxed(ti, accounts)) return { ...MAXED_SKILLS }
+  const r = mulberry32((SLIDER_SEED ^ ((ti + 1) * 0x85ebca6b)) >>> 0)
   const p = <T,>(a: readonly T[]): T => a[Math.floor(r() * a.length)]
   return {
-    interplanetaryConsolidation: p([2, 3, 3, 4, 4, 4, 5, 5, 5, 5]),
-    commandCenterUpgrades:       p([2, 3, 3, 4, 4, 5, 5]),
-    remoteSensing:               p([0, 1, 2, 3, 4, 5]),
-    planetology:                 p([1, 2, 3, 3, 4, 5]),
-    advancedPlanetology:         p([0, 0, 1, 2, 3, 4]),
+    interplanetaryConsolidation: p([1, 2, 2, 3, 3, 4]),
+    commandCenterUpgrades:       p([2, 3, 3, 4, 4, 5]),
+    remoteSensing:               p([0, 1, 2, 3, 4]),
+    planetology:                 p([1, 2, 3, 3, 4]),
+    advancedPlanetology:         p([0, 0, 1, 2, 3]),
   }
 }
-const altCapacity = (ci: number) => 1 + skillsForAlt(ci).interplanetaryConsolidation
+const altCapacity = (ti: number, accounts: number) => 1 + skillsForAlt(ti, accounts).interplanetaryConsolidation
 
 // Turn distributed buckets of raw planets into characters. Per-alt skills come
-// from skillsForAlt(ci) (deterministic); no draws from the main RNG stream, so
-// an empire of N planets stays a stable prefix of an empire of N+1.
-function buildCharactersFromBuckets(buckets: RawPlanet[][]): { characters: StoredCharacter[]; planetTotal: number } {
+// from skillsForAlt(ci, accounts) (deterministic) — no draws from the main RNG
+// stream, so the raws-derived planet data stays stable as the empire grows.
+function buildCharactersFromBuckets(buckets: RawPlanet[][], accounts: number): { characters: StoredCharacter[]; planetTotal: number } {
   let pid = 1
   const characters = buckets.map((bucket, ci) => {
     const sys = SYSTEMS[ci % SYSTEMS.length]
@@ -287,7 +308,7 @@ function buildCharactersFromBuckets(buckets: RawPlanet[][]): { characters: Store
     return {
       characterId: 98_000_000 + ci * 13,
       characterName: NAMES[ci % NAMES.length],
-      piSkills: skillsForAlt(ci),
+      piSkills: skillsForAlt(ci, accounts),
       planets,
     }
   })
@@ -311,31 +332,15 @@ function buildRawsForPlanetCount(planetCount: number): RawPlanet[] {
   return raws.slice(0, planetCount)
 }
 
-// Fill alt 0 to its cap, then alt 1, … (auto alt count). Monotonic: each alt's
-// cap is stable, so growing the planet count extends the last alt or adds one.
-function sequentialBuckets(raws: RawPlanet[]): RawPlanet[][] {
+// Fill each alt to its own capacity, in order. caps[ti] = 1 + IC for alt ti, so
+// maxed alts get 6 planets and still-training ones fewer. raws is built to the
+// total capacity, so every alt ends up full.
+function bucketsByCaps(raws: RawPlanet[], caps: number[]): RawPlanet[][] {
   const buckets: RawPlanet[][] = []
-  let idx = 0, ci = 0
-  while (idx < raws.length) {
-    const cap = altCapacity(ci)
+  let idx = 0
+  for (const cap of caps) {
     buckets.push(raws.slice(idx, idx + cap))
     idx += cap
-    ci++
-  }
-  return buckets
-}
-
-// Spread raws as evenly as possible across a FIXED number of alts, never
-// exceeding any alt's cap. Used when the user pins both alt + planet counts.
-function roundRobinBuckets(raws: RawPlanet[], altCount: number): RawPlanet[][] {
-  const buckets: RawPlanet[][] = Array.from({ length: altCount }, () => [])
-  let ci = 0
-  for (const r of raws) {
-    let tries = 0
-    while (buckets[ci % altCount].length >= altCapacity(ci % altCount) && tries < altCount) { ci++; tries++ }
-    if (tries >= altCount) break // every alt is at capacity
-    buckets[ci % altCount].push(r)
-    ci++
   }
   return buckets
 }
@@ -349,32 +354,20 @@ function statsFor(characters: StoredCharacter[], raws: RawPlanet[], planetTotal:
 }
 
 /**
- * Empire of (up to) `planetCount` planets across as many alts as needed, each
- * alt filled to its randomized capacity (1 + IC). Seeded ⇒ reproducible and
- * empire(N) is a prefix-superset of empire(N+1) — the dev slider grows ONE
- * stable empire.
+ * Empire of `accounts` accounts (1..MAX_ACCOUNTS), each running all 3 alts. The
+ * more accounts, the likelier each alt is maxed; at MAX_ACCOUNTS every alt is
+ * maxed. The first alt of the first account is always maxed. Every alt is filled
+ * to its skill-capacity. Seeded ⇒ reproducible.
  */
-export function generateEmpireByPlanets(planetCount: number, seed = SLIDER_SEED): { characters: StoredCharacter[]; stats: EmpireStats } {
-  const n = Math.max(1, Math.min(MAX_PLANETS, Math.floor(planetCount)))
-  _rng = mulberry32(seed)
-  const raws = buildRawsForPlanetCount(n)
-  const { characters, planetTotal } = buildCharactersFromBuckets(sequentialBuckets(raws))
-  return { characters, stats: statsFor(characters, raws, planetTotal) }
-}
-
-/**
- * Empire pinned to `altCount` alts and `planetCount` planets (each clamped to
- * range; planets also clamped to the alts' total randomized capacity). Planets
- * are spread evenly across the alts. Seeded ⇒ reproducible.
- */
-export function generateEmpireByCounts(altCount: number, planetCount: number, seed = SLIDER_SEED): { characters: StoredCharacter[]; stats: EmpireStats } {
-  const a = Math.max(1, Math.min(MAX_ALTS, Math.floor(altCount)))
+export function generateEmpireByAccounts(accounts: number, seed = SLIDER_SEED): { characters: StoredCharacter[]; stats: EmpireStats } {
+  const a = Math.max(1, Math.min(MAX_ACCOUNTS, Math.floor(accounts)))
+  const altCount = a * ALTS_PER_ACCOUNT
+  const caps: number[] = []
   let capacity = 0
-  for (let ci = 0; ci < a; ci++) capacity += altCapacity(ci)
-  const p = Math.max(1, Math.min(MAX_PLANETS, capacity, Math.floor(planetCount)))
+  for (let ti = 0; ti < altCount; ti++) { const c = altCapacity(ti, a); caps.push(c); capacity += c }
   _rng = mulberry32(seed)
-  const raws = buildRawsForPlanetCount(p)
-  const { characters, planetTotal } = buildCharactersFromBuckets(roundRobinBuckets(raws, a))
+  const raws = buildRawsForPlanetCount(capacity)
+  const { characters, planetTotal } = buildCharactersFromBuckets(bucketsByCaps(raws, caps), a)
   return { characters, stats: statsFor(characters, raws, planetTotal) }
 }
 
@@ -387,16 +380,9 @@ function writeStore(characters: StoredCharacter[]): void {
   }))
 }
 
-/** Seed an empire of (up to) `planetCount` planets and write it. Caller reloads. */
-export function seedEmpireByPlanets(planetCount: number): EmpireStats {
-  const { characters, stats } = generateEmpireByPlanets(planetCount)
-  writeStore(characters)
-  return stats
-}
-
-/** Seed an empire pinned to `altCount` alts + `planetCount` planets. Caller reloads. */
-export function seedEmpireByCounts(altCount: number, planetCount: number): EmpireStats {
-  const { characters, stats } = generateEmpireByCounts(altCount, planetCount)
+/** Seed an empire of `accounts` accounts and write it. Caller reloads. */
+export function seedEmpireByAccounts(accounts: number): EmpireStats {
+  const { characters, stats } = generateEmpireByAccounts(accounts)
   writeStore(characters)
   return stats
 }

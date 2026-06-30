@@ -5,6 +5,7 @@ import { ChainView } from './components/ChainView/ChainView'
 import { HaulPlan } from './components/HaulPlan/HaulPlan'
 import { SkillEditor } from './components/SkillEditor/SkillEditor'
 import { FeedbackModal } from './components/Feedback/FeedbackModal'
+import { MAX_ACCOUNTS, ALTS_PER_ACCOUNT, MAX_SUPPORTED_CHARACTERS } from './capacity'
 import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary'
 import type { StoredCharacter, PISkillLevels } from './types/api'
 import styles from './App.module.css'
@@ -49,9 +50,30 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('setup')
   const [skillEditChar, setSkillEditChar] = useState<StoredCharacter | null>(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  // When the feedback modal is opened from the over-capacity prompt it arrives
+  // pre-filled and ready to send; a normal open clears this back to a blank form.
+  const [feedbackPrefill, setFeedbackPrefill] = useState<{ message: string; type: 'bug' | 'idea' } | null>(null)
+  const [capacityDismissed, setCapacityDismissed] = useState(false)
   const [haulFocusNonce, setHaulFocusNonce] = useState(0)
 
   const noElectron = typeof window.api === 'undefined'
+
+  // We built (and perf-tuned) for up to MAX_ACCOUNTS accounts. Past the ceiling we
+  // don't pretend — we surface a friendly prompt that opens feedback pre-filled, so
+  // the GitHub issue lands with a recognizable "needs more capacity" report.
+  const overCapacity = characters.length > MAX_SUPPORTED_CHARACTERS
+  const openCapacityFeedback = () => {
+    const accounts = Math.ceil(characters.length / ALTS_PER_ACCOUNT)
+    setFeedbackPrefill({
+      type: 'idea',
+      message:
+        `🚀 More than ${MAX_ACCOUNTS} accounts! I'm running ${characters.length} characters ` +
+        `(~${accounts} accounts), past the supported ceiling of ${MAX_SUPPORTED_CHARACTERS} characters ` +
+        `/ ${MAX_ACCOUNTS} accounts. Please add support for bigger empires!`,
+    })
+    setFeedbackOpen(true)
+  }
+  const openFeedback = () => { setFeedbackPrefill(null); setFeedbackOpen(true) }
 
   const { prices, lastUpdated, nextUpdateAt } = useMarketPrices()
 
@@ -174,7 +196,7 @@ export default function App() {
               {expiredCount}
             </button>
           )}
-          <button className={styles.feedbackBtn} onClick={() => setFeedbackOpen(true)}>
+          <button className={styles.feedbackBtn} onClick={openFeedback}>
             💬 Feedback
           </button>
         </div>
@@ -183,6 +205,30 @@ export default function App() {
       {noElectron && (
         <div className={styles.warnBanner}>
           Running outside Electron — API calls will not work. Run with <code>npm run dev</code>.
+        </div>
+      )}
+
+      {overCapacity && !capacityDismissed && (
+        <div className={styles.warnBanner} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1 }}>
+            🚀 Whoa — {characters.length} characters! We never expected anyone to run THIS many
+            accounts, so we cap our tooling at {MAX_ACCOUNTS}.{' '}
+            <button
+              onClick={openCapacityFeedback}
+              style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+            >
+              Tell us
+            </button>{' '}
+            and we'll add support for more.
+          </span>
+          <button
+            onClick={() => setCapacityDismissed(true)}
+            aria-label="Dismiss"
+            title="Dismiss"
+            style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px' }}
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -261,6 +307,8 @@ export default function App() {
         <FeedbackModal
           screen={tab === 'setup' ? 'Setup' : tab === 'chain' ? 'Production Chain' : 'Haul Plan'}
           characterCount={characters.length}
+          initialMessage={feedbackPrefill?.message}
+          initialType={feedbackPrefill?.type}
           onClose={() => setFeedbackOpen(false)}
         />
       )}

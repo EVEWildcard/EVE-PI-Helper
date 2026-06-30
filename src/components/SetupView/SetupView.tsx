@@ -3,7 +3,7 @@ import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { PLANET_TYPES } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
-import { seedEmpireByPlanets, seedEmpireByCounts, clearTestData, MAX_PLANETS, MAX_ALTS, DEFAULT_DEV_PLANETS } from '../../dev/seedData'
+import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
 import styles from './SetupView.module.css'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -539,22 +539,14 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
   const [planetSort, setPlanetSort] = useState<PlanetSort>(
     () => (localStorage.getItem('setup.planetSort') as PlanetSort) ?? 'name'
   )
-  // Dev-only generators (stress-test the production chain). The Scale slider
-  // grows ONE seeded empire by planet count (alts auto-added at randomized
-  // capacity); the Alts/Planets inputs pin both counts exactly.
-  const curPlanets = characters.reduce((s, c) => s + c.planets.length, 0)
-  const [seedPlanets, setSeedPlanets] = useState(() =>
-    Math.min(MAX_PLANETS, Math.max(1, curPlanets || DEFAULT_DEV_PLANETS))
+  // Dev-only generator (stress-test the production chain). The Scale slider is
+  // ACCOUNT-based: one seeded empire of N accounts (each running all 3 alts);
+  // the more accounts, the likelier each alt is maxed (all maxed at the ceiling).
+  const curAccounts = Math.max(1, Math.ceil(characters.length / ALTS_PER_ACCOUNT))
+  const [seedAccounts, setSeedAccounts] = useState(() =>
+    Math.min(MAX_ACCOUNTS, characters.length ? curAccounts : DEFAULT_DEV_ACCOUNTS)
   )
-  const commitSeed = () => { seedEmpireByPlanets(seedPlanets); window.location.reload() }
-  const [altsInput, setAltsInput] = useState(() => String(characters.length || 8))
-  const [planetsInput, setPlanetsInput] = useState(() => String(curPlanets || DEFAULT_DEV_PLANETS))
-  const applyCounts = () => {
-    const a = Math.max(1, Math.min(MAX_ALTS, parseInt(altsInput, 10) || 1))
-    const p = Math.max(1, Math.min(MAX_PLANETS, parseInt(planetsInput, 10) || 1))
-    seedEmpireByCounts(a, p)
-    window.location.reload()
-  }
+  const commitSeed = () => { seedEmpireByAccounts(seedAccounts); window.location.reload() }
 
   // Dev-only: on a fresh local store, auto-seed the default test empire (≈8 alts
   // / 48 planets) with suggestions on, to match the canonical readability-test
@@ -566,7 +558,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
     if (localStorage.getItem('evepi.dev.seeded')) return
     localStorage.setItem('evepi.dev.seeded', '1')
     localStorage.setItem('chainView.suggestions', 'true')
-    seedEmpireByPlanets(DEFAULT_DEV_PLANETS)
+    seedEmpireByAccounts(DEFAULT_DEV_ACCOUNTS)
     window.location.reload()
   }, [characters.length])
 
@@ -595,48 +587,25 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
             <>
               <span
                 className={styles.planetSortLabel}
-                title="Dev: grow ONE seeded empire by planet count; alts auto-added at randomized capacity. 900 = ~150 toons, the graceful-degradation ceiling."
+                title={`Dev: seed ONE empire of N accounts (each runs all ${ALTS_PER_ACCOUNT} alts). The more accounts, the likelier each alt is maxed; at ${MAX_ACCOUNTS} accounts every alt is maxed (the supported ceiling). The first alt of the first account is always maxed.`}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 Scale
                 <input
                   type="range"
                   min={1}
-                  max={MAX_PLANETS}
-                  value={seedPlanets}
-                  onChange={(e) => setSeedPlanets(Number(e.target.value))}
+                  max={MAX_ACCOUNTS}
+                  value={seedAccounts}
+                  onChange={(e) => setSeedAccounts(Number(e.target.value))}
                   onPointerUp={commitSeed}
                   onKeyUp={(e) => { if (e.key !== 'Tab') commitSeed() }}
                   style={{ width: 150, verticalAlign: 'middle' }}
                 />
                 {/* Fixed width so the readout never reflows the slider while dragging. */}
-                <span style={{ display: 'inline-block', width: 56, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
-                  {seedPlanets} pl
+                <span style={{ display: 'inline-block', width: 64, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+                  {seedAccounts} acct{seedAccounts === 1 ? '' : 's'}
                 </span>
               </span>
-              <span className={styles.planetSortLabel} style={{ marginLeft: 6 }}>Alts</span>
-              <input
-                type="number" min={1} max={MAX_ALTS} value={altsInput}
-                onChange={(e) => setAltsInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') applyCounts() }}
-                style={{ width: 48 }}
-                title="Number of alts"
-              />
-              <span className={styles.planetSortLabel}>Planets</span>
-              <input
-                type="number" min={1} max={MAX_PLANETS} value={planetsInput}
-                onChange={(e) => setPlanetsInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') applyCounts() }}
-                style={{ width: 56 }}
-                title="Total planets (capped at the alts' combined capacity)"
-              />
-              <button
-                className={styles.planetSortBtn}
-                onClick={applyCounts}
-                title="Dev only: generate exactly this many alts + planets (randomized realistic skills)"
-              >
-                Apply
-              </button>
               <button
                 className={styles.planetSortBtn}
                 title="Dev only: wipe all characters"
