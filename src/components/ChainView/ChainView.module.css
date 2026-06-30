@@ -497,6 +497,106 @@
   margin-left: 3px;
 }
 
+/* ── Suggestions column (second right-side column, green-tinted) ── */
+
+.suggestPanel {
+  border-color: rgba(74, 176, 149, 0.3);
+}
+
+.suggestHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px 2px;
+}
+
+.suggestThresh {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #4ab095;
+  white-space: nowrap;
+}
+.suggestThresh input {
+  width: 36px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 3px;
+}
+.suggestThresh input:focus { outline: none; border-color: #4ab095; }
+
+.suggestRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(74, 176, 149, 0.08);
+  border: 1px solid rgba(74, 176, 149, 0.25);
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  transition: background 0.1s, border-color 0.1s;
+}
+.suggestRow:hover, .suggestRowActive {
+  background: rgba(74, 176, 149, 0.18);
+  border-color: rgba(74, 176, 149, 0.55);
+}
+.suggestRowBlocked {
+  background: rgba(208, 80, 80, 0.08);
+  border-color: rgba(208, 80, 80, 0.25);
+}
+.suggestRowBlocked:hover, .suggestRowBlocked.suggestRowActive {
+  background: rgba(208, 80, 80, 0.16);
+  border-color: rgba(208, 80, 80, 0.5);
+}
+
+.suggestIcon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.suggestText {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestName {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestIsk {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4ab095;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.suggestEmpty {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding: 4px 2px;
+}
+
 /* ── Ghost / suggested node ── */
 
 .nodeGhost {

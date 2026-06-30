@@ -3,8 +3,9 @@ import type { StoredCharacter } from '../../types/api'
 import { PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
 import type { PITier } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
-import { useChainSuggestions, useBalanceHints, formatTrainTime, type ChainSuggestion } from '../../hooks/useChainSuggestions'
+import { useChainSuggestions, useBalanceHints, type ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
+import { buildChainModel } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
 import {
@@ -254,6 +255,14 @@ function getP0Roots(name: string, visited = new Set<string>()): string[] {
   return Array.from(new Set(inputs.flatMap(i => getP0Roots(i, new Set(visited)))))
 }
 
+/** All product names in a chain: the product plus every recursive input. */
+function collectChainNames(name: string, acc = new Set<string>()): Set<string> {
+  if (acc.has(name)) return acc
+  acc.add(name)
+  for (const inp of SCHEMATIC_INPUTS_BY_NAME.get(name) ?? []) collectChainNames(inp, acc)
+  return acc
+}
+
 function getMissingInputHint(name: string): string {
   const product = PRODUCT_BY_NAME.get(name)
   const tier = product?.tier ?? 'P1'
@@ -339,129 +348,39 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     window.addEventListener('keyup', up)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [])
-  const [showSuggestions, setShowSuggestions] = useState(
-    () => suggestionsAllowed && localStorage.getItem('chainView.suggestions') === 'true'
-  )
   const [assumeMaxSkills, setAssumeMaxSkills] = useState(false)
   const [selectedSuggestion, setSelectedSuggestion] = useState<ChainSuggestion | null>(null)
-  function toggleSuggestions(v: boolean) {
-    localStorage.setItem('chainView.suggestions', String(v))
-    setShowSuggestions(v)
+  // Suggestions are always on now (no toggle) and live in the right-side column.
+  // Hovering a row locates its chain in the graph; the ISK-impact threshold
+  // (% of current income) filters out the small ones. Both persisted.
+  const [hoverSuggestKey, setHoverSuggestKey] = useState<string | null>(null)
+  const [threshold, setThreshold] = useState(() => {
+    const v = parseFloat(localStorage.getItem('chainView.suggestThreshold') ?? '')
+    return Number.isFinite(v) ? v : 15
+  })
+  function updateThreshold(v: number) {
+    const clamped = Math.max(0, Math.min(100, Math.round(v)))
+    localStorage.setItem('chainView.suggestThreshold', String(clamped))
+    setThreshold(clamped)
   }
 
   const { systemPlanets, loading: systemPlanetsLoading } = useSystemPlanets(characters)
-  const suggestions = useChainSuggestions(characters, prices, assumeMaxSkills, systemPlanets)
+  const suggestions = useChainSuggestions(characters, prices, assumeMaxSkills, systemPlanets, 30)
   const balanceHints = useBalanceHints(characters)
+  // Current income = Σ terminal iskHrNow — the basis for the ISK-impact filter.
+  const chainModel = useMemo(() => buildChainModel(characters, prices), [characters, prices])
+  const currentIncome = useMemo(
+    () => chainModel.terminals.reduce((sum, t) => sum + t.iskHrNow, 0),
+    [chainModel]
+  )
 
   const { nodes: rawNodes, edges: rawEdges, producedNames } = useMemo(() => buildGraph(characters), [characters])
   const { nodes: baseNodes, edges: baseEdges } = useMemo(() => clusterP1Nodes(rawNodes, rawEdges), [rawNodes, rawEdges])
 
-  // ── Ghost nodes from suggestions ────────────────────────────────────────────
-  const { nodes, edges } = useMemo(() => {
-    if (!showSuggestions || suggestions.length === 0) return { nodes: baseNodes, edges: baseEdges }
-
-    const colRowCount = new Map<number, number>()
-    for (const n of baseNodes) colRowCount.set(n.column, (colRowCount.get(n.column) ?? 0) + 1)
-
-    // Build a lookup of what each base node produces
-    const baseProducedBy = new Map<string, ChainNode>()
-    for (const n of baseNodes) for (const name of n.outputNames) baseProducedBy.set(name, n)
-
-    const ghostNodes: ChainNode[] = []
-    const ghostEdges: ChainEdge[] = []
-
-    for (const s of suggestions) {
-      // ── Main suggestion node (the final product) ──────────────────────────
-      const mainCol = TIER_COL[s.product.tier] ?? 0
-      const mainRow = colRowCount.get(mainCol) ?? 0
-      colRowCount.set(mainCol, mainRow + 1)
-      ghostNodes.push({
-        key: s.key,
-        planetId: -1,
-        planetName: `Suggested: ${s.product.name}`,
-        planetType: '',
-        characterId: s.characterId,
-        characterName: s.characterName,
-        outputTypeIds: [s.product.typeId],
-        outputNames: [s.product.name],
-        outputTiers: [s.product.tier as PITier],
-        outputName: s.product.name,
-        outputTier: s.product.tier as PITier,
-        inputNames: s.inputs.map(i => i.name),
-        unassigned: false,
-        column: mainCol,
-        row: mainRow,
-        suggested: true,
-        suggestion: s,
-      })
-
-      // ── Step ghost nodes for each new planet needed ───────────────────────
-      // chainSteps only lists items not already produced, in dependency order
-      const stepKeyByProduct = new Map<string, string>([[s.product.name, s.key]])
-
-      for (const step of s.chainSteps) {
-        if (step.produces === s.product.name) continue // main node covers this
-        const stepTier = (PRODUCT_BY_NAME.get(step.produces)?.tier ?? 'P1') as PITier
-        const stepCol = TIER_COL[stepTier] ?? 0
-        const stepRow = colRowCount.get(stepCol) ?? 0
-        colRowCount.set(stepCol, stepRow + 1)
-        const stepKey = `${s.key}:step:${step.produces}`
-        stepKeyByProduct.set(step.produces, stepKey)
-        const inputNames = step.role === 'extractor'
-          ? (step.extractsP0 ? [step.extractsP0] : [])
-          : (step.factoryInputs ?? [])
-        ghostNodes.push({
-          key: stepKey,
-          planetId: -1,
-          planetName: step.role === 'extractor' ? `New ${step.planetCategory} planet` : 'New factory planet',
-          planetType: step.planetCategory,
-          characterId: step.characterId,
-          characterName: step.characterName,
-          outputTypeIds: [],
-          outputNames: [step.produces],
-          outputTiers: [stepTier],
-          outputName: step.produces,
-          outputTier: stepTier,
-          inputNames,
-          unassigned: false,
-          column: stepCol,
-          row: stepRow,
-          suggested: true,
-          isStep: true,
-          suggestion: s,
-        })
-      }
-
-      // ── Edges for all ghost nodes in this suggestion ──────────────────────
-      const ghostKeysInSuggestion = new Set(stepKeyByProduct.values())
-      for (const [product, fromKey] of stepKeyByProduct) {
-        const tier = (PRODUCT_BY_NAME.get(product)?.tier ?? 'P1') as PITier
-        // Ghost → ghost
-        for (const [, toKey] of stepKeyByProduct) {
-          if (fromKey === toKey) continue
-          const toNode = ghostNodes.find(n => n.key === toKey)
-          if (toNode?.inputNames.includes(product))
-            ghostEdges.push({ fromKey, toKey, productName: product, tier })
-        }
-        // Ghost → base node
-        for (const base of baseNodes) {
-          if (base.inputNames.includes(product))
-            ghostEdges.push({ fromKey, toKey: base.key, productName: product, tier })
-        }
-      }
-      // Base → ghost step node
-      for (const ghostKey of ghostKeysInSuggestion) {
-        const ghostNode = ghostNodes.find(n => n.key === ghostKey)
-        if (!ghostNode) continue
-        for (const inputName of ghostNode.inputNames) {
-          const base = baseProducedBy.get(inputName)
-          if (base) ghostEdges.push({ fromKey: base.key, toKey: ghostKey, productName: inputName, tier: base.outputTier })
-        }
-      }
-    }
-
-    return { nodes: [...baseNodes, ...ghostNodes], edges: [...baseEdges, ...ghostEdges] }
-  }, [baseNodes, baseEdges, suggestions, showSuggestions])
+  // In-graph ghost suggestion nodes are superseded by the suggestions column
+  // (right side), so the graph renders just the real planets.
+  const nodes = baseNodes
+  const edges = baseEdges
 
   // Character color palette — distinct from TIER_COLOR values (P1=#4a90c8, P2=#8060c0, P3=#c06040, P4=#c09020)
   const CHAR_PALETTE = [
@@ -643,8 +562,30 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
       ).map(n => n.key))
     : null
 
-  // What's currently emphasized — a hovered warning wins over a hovered node.
-  const highlight = warnKeys ?? connectedSet
+  // ── Suggestions column (right side) ──────────────────────────────────────────
+  // Only suggestions whose ISK/hr would raise income considerably — at least the
+  // configured % of current income. (When income is 0 the threshold is 0, so all
+  // show.) The panel itself always renders when there are any suggestions, so the
+  // threshold control stays reachable even if everything is filtered out.
+  const minSuggestIsk = currentIncome * (threshold / 100)
+  const shownSuggestions = suggestions.filter(s => s.iskHr >= minSuggestIsk)
+  const showSuggestPanel = suggestionsAllowed && suggestions.length > 0
+
+  // Suggestion-row hover → locate the involved existing planets / chain in graph.
+  const hoverSuggestion = hoverSuggestKey ? shownSuggestions.find(s => s.key === hoverSuggestKey) : null
+  const suggestKeys: Set<string> | null = hoverSuggestion
+    ? (() => {
+        const names = collectChainNames(hoverSuggestion.prereqFor?.name ?? hoverSuggestion.product.name)
+        for (const inp of hoverSuggestion.inputs) names.add(inp.name)
+        return new Set(nodes.filter(n =>
+          n.outputNames.some(o => names.has(o)) || n.inputNames.some(o => names.has(o)) ||
+          (n.isCluster ? !!n.clusterMembers?.some(m => m.outputNames.some(o => names.has(o))) : false)
+        ).map(n => n.key))
+      })()
+    : null
+
+  // What's currently emphasized — a hovered warning or suggestion wins over a hovered node.
+  const highlight = warnKeys ?? suggestKeys ?? connectedSet
 
   // Alt color for a node key (node border tint + hovered-chain arrow tint at scale).
   const altColorOf = (key: string): string | undefined => {
@@ -707,24 +648,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         )}
         {focusTitle && <span className={styles.focusTitle}>{focusTitle}</span>}
         {suggestionsAllowed && (
-          <button
-            className={`${styles.suggestToggle} ${showSuggestions ? styles.suggestToggleActive : ''}`}
-            onClick={() => toggleSuggestions(!showSuggestions)}
-            title="Show chain suggestions"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2 2"/>
-              <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              <circle cx="7" cy="7" r="1.2" fill="currentColor"/>
-            </svg>
-            Suggestions
-            {systemPlanetsLoading && <span className={styles.suggestLoading}>…</span>}
-          </button>
-        )}
-        {suggestionsAllowed && showSuggestions && (
           <label className={styles.maxSkillsLabel} title="Assume all characters have max PI skills (IPC 5)">
             <input type="checkbox" checked={assumeMaxSkills} onChange={e => setAssumeMaxSkills(e.target.checked)} />
             Max skills
+            {systemPlanetsLoading && <span className={styles.suggestLoading}>…</span>}
           </label>
         )}
       </div>
@@ -735,9 +662,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             Drag to pan · the production chain is best viewed on a wider screen
           </div>
         )}
-        {/* Warnings column — pinned right; hover a row to locate it in the graph. */}
+        {/* Warnings column — pinned right (shifts left when the suggestions column
+            shows); hover a row to locate it in the graph. */}
         {balanceHints.length > 0 && (
-          <div className={styles.warningsPanel}>
+          <div className={styles.warningsPanel} style={{ right: showSuggestPanel ? 252 : 12 }}>
             <div className={styles.warningsTitle}>Issues · {balanceHints.length}</div>
             {balanceHints.map((hint, idx) => {
               const isBottleneck = hint.type === 'bottleneck'
@@ -759,6 +687,50 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                 </div>
               )
             })}
+          </div>
+        )}
+        {/* Suggestions column — second column pinned to the far right (issues sit
+            to its left). Always on; hover a row to locate the chain, click to open
+            the plan. Filtered to suggestions worth ≥ threshold% of current income. */}
+        {showSuggestPanel && (
+          <div className={`${styles.warningsPanel} ${styles.suggestPanel}`} style={{ right: 12 }}>
+            <div className={styles.suggestHead}>
+              <span className={styles.warningsTitle}>
+                Suggestions · {shownSuggestions.length}
+                {systemPlanetsLoading && <span className={styles.suggestLoading}>…</span>}
+              </span>
+              <label className={styles.suggestThresh} title="Only show suggestions worth at least this % of your current income/hr">
+                ≥
+                <input
+                  type="number" min={0} max={100} value={threshold}
+                  onChange={e => updateThreshold(Number(e.target.value))}
+                />
+                %
+              </label>
+            </div>
+            {shownSuggestions.length === 0 ? (
+              <div className={styles.suggestEmpty}>
+                No suggestion clears the {threshold}% bar. Lower it to see smaller wins.
+              </div>
+            ) : shownSuggestions.map(s => (
+              <div
+                key={s.key}
+                className={`${styles.suggestRow} ${s.blocked ? styles.suggestRowBlocked : ''} ${hoverSuggestKey === s.key ? styles.suggestRowActive : ''}`}
+                onMouseEnter={() => setHoverSuggestKey(s.key)}
+                onMouseLeave={() => setHoverSuggestKey(null)}
+                onClick={() => setSelectedSuggestion(s)}
+                title={`${s.product.tier} ${s.product.name} · ≈ +${formatIsk(s.iskHr)}/hr potential. Hover to locate the chain; click for the step-by-step plan.`}
+              >
+                <span className={styles.suggestIcon}>{s.blocked ? '⚠' : s.prereqFor ? '↻' : '✦'}</span>
+                <span className={styles.suggestText}>
+                  <span className={styles.suggestName}>
+                    <span className={`badge badge-${s.product.tier.toLowerCase()}`} style={{ marginRight: 4, fontSize: 9 }}>{s.product.tier}</span>
+                    {s.product.name}
+                  </span>
+                  <span className={styles.suggestIsk}>+{formatIsk(s.iskHr)}/hr</span>
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {/* Tier band labels — outside canvasInner, pinned to canvas left, Y converted to visual coords */}
@@ -836,15 +808,12 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               hovered={hoveredKey === node.key}
               dimmed={highlight !== null && !highlight.has(node.key)}
               borderColor={
-                node.suggested ? '#4ab095'
-                : (manyAlts && !(highlight?.has(node.key)))
+                (manyAlts && !(highlight?.has(node.key)))
                   ? TIER_COLOR[node.outputTier]
                   : (charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])
               }
               charColorByCharId={charColorByCharId}
               onHover={setHoveredKey}
-              onSelectSuggestion={setSelectedSuggestion}
-              characters={characters}
               onInputRef={(name, el) => {
                 const key = `${node.key}:${name}`
                 if (el) inputChipRefs.current.set(key, el)
@@ -906,13 +875,11 @@ interface PlanetNodeProps {
   borderColor: string
   charColorByCharId: Map<number, string>
   onHover: (key: string | null) => void
-  onSelectSuggestion?: (s: ChainSuggestion) => void
-  characters: StoredCharacter[]
   onInputRef?: (name: string, el: HTMLSpanElement | null) => void
 }
 
 const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
-  function PlanetNode({ node, producedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, charColorByCharId, onHover, onSelectSuggestion, characters, onInputRef }, ref) {
+  function PlanetNode({ node, producedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, charColorByCharId, onHover, onInputRef }, ref) {
     const dotColor = PLANET_COLOR[node.planetType] ?? '#404050'
 
     // P1 cluster node: grouped by P2 consumer, sub-divided by character inside
@@ -956,121 +923,6 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
               )
             })}
           </div>
-        </div>
-      )
-    }
-
-    // Step ghost node: a new extractor or factory planet needed by a suggestion
-    if (node.suggested && node.isStep) {
-      const tierColor = TIER_COLOR[node.outputTier]
-      return (
-        <div ref={ref}
-          className={`${styles.node} ${styles.nodeGhost} ${hovered ? styles.nodeGhostHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
-          style={{ left: x, top: y, width: NODE_W, cursor: 'pointer' }}
-          onMouseEnter={() => onHover(node.key)}
-          onMouseLeave={() => onHover(null)}
-          onClick={() => onSelectSuggestion?.(node.suggestion!)}
-          title="Click to open plan"
-        >
-          <div className={styles.nodeGhostStripe} />
-          <div className={styles.nodeHeader}>
-            <span className={styles.nodeDot} style={{ background: dotColor }} />
-            <span className={styles.nodePlanetName}>{node.planetName}</span>
-            <span className={styles.nodeChar}>{node.characterName}</span>
-          </div>
-          <div className={styles.nodeOutputs}>
-            <span className={styles.nodeOutputChip} style={{ '--tier-color': tierColor } as React.CSSProperties}>
-              <span className={styles.nodeTierBadge}>{node.outputTier}</span>{node.outputName}
-            </span>
-          </div>
-          {node.inputNames.length > 0 && (
-            <div className={styles.nodeInputs}>
-              {node.inputNames.map(n => (
-                <span key={n} className={`${styles.nodeInput} ${styles.nodeInputSelf}`}>{n}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      )
-    }
-
-    // Main suggestion ghost node: full suggestion card
-    if (node.suggested && node.suggestion) {
-      const s = node.suggestion
-      const slotCount = s.slotsNeeded
-      return (
-        <div ref={ref}
-          className={`${styles.node} ${styles.nodeGhost} ${s.blocked ? styles.nodeGhostBlocked : ''} ${hovered ? styles.nodeGhostHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
-          style={{ left: x, top: y, width: NODE_W, cursor: 'pointer' }}
-          onMouseEnter={() => onHover(node.key)}
-          onMouseLeave={() => onHover(null)}
-          onClick={() => onSelectSuggestion?.(s)}
-          title="Click to open plan"
-        >
-          <div className={styles.nodeGhostStripe} />
-          <div className={styles.nodeHeader}>
-            <span className={`${styles.nodeGhostBadge} ${s.blocked ? styles.nodeGhostBadgeBlocked : ''}`}>
-              {s.blocked ? '⚠ Blocked' : s.prereqFor ? '↻ Complete' : '✦ Suggest'}
-            </span>
-            <span className={styles.nodeGhostTitle}>
-              <span className={`badge badge-${s.product.tier.toLowerCase()}`} style={{ marginRight: 5, fontSize: 10 }}>{s.product.tier}</span>
-              {s.product.name}
-            </span>
-            <span className={styles.nodeGhostChar}>{s.characterName}</span>
-          </div>
-          {/* Inputs section — reuse nodeOutputs layout */}
-          <div className={styles.nodeOutputs}>
-            {s.inputs.map(inp => {
-              const cls = inp.status === 'available' ? styles.nodeInputCovered : styles.nodeInputMissing
-              const title = inp.status === 'available' ? 'Already produced' : 'Needs new planet(s)'
-              return (
-                <span key={inp.name} className={`${styles.nodeInput} ${cls}`} title={title}>
-                  {inp.name}
-                </span>
-              )
-            })}
-          </div>
-          {s.prereqFor && (
-            <div className={styles.nodeGhostIsk} style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-              → completes <span className={`badge badge-${s.prereqFor.tier.toLowerCase()}`} style={{ fontSize: 9 }}>{s.prereqFor.tier}</span> {s.prereqFor.name}
-            </div>
-          )}
-          <div className={styles.nodeGhostIsk}>≈ {formatIsk(s.iskHr)}/hr potential</div>
-          {s.blocked && (() => {
-            const assignedChar = characters.find(c => c.characterName === s.characterName)
-            const t = assignedChar?.skillTraining?.interplanetaryConsolidation
-            const training = t?.toLevel === s.blocked.trainToLevel ? t : undefined
-            const timeLeft = training ? Math.max(0, new Date(training.finishDate).getTime() - Date.now()) : 0
-            const tlH = Math.floor(timeLeft / 3600_000)
-            const tlM = Math.floor((timeLeft % 3600_000) / 60_000)
-            return (
-              <div className={styles.nodeGhostBlockedRow}>
-                Needs {s.blocked.extraSlotsNeeded} more slot{s.blocked.extraSlotsNeeded !== 1 ? 's' : ''} — train IC {s.blocked.trainFromLevel}→{s.blocked.trainToLevel} ({formatTrainTime(s.blocked.trainTimeHours)})
-                {training && (
-                  <span className={styles.nodeGhostTraining}>
-                    {' '}· {s.characterName} training now — {tlH > 0 ? `${tlH}h ${tlM}m` : `${tlM}m`} left
-                  </span>
-                )}
-              </div>
-            )
-          })()}
-          {s.repurposes ? (
-            <div className={styles.nodeGhostRepurposeBlock}>
-              <div className={styles.nodeGhostRepurposeHeader}>
-                ↺ Repurpose {s.repurposes.planet.name}
-                {s.repurposes.characterName !== s.characterName && (
-                  <span className={styles.nodeGhostRepurposeChar}> · {s.repurposes.characterName}</span>
-                )}
-              </div>
-              <div className={styles.nodeGhostRepurposeDetail}>
-                Currently making <span className={styles.nodeGhostRepurposeLoses}>{s.repurposes.currentOutputNames.join(', ')}</span>
-                {' '}— not feeding any chain, safe to repurpose.
-              </div>
-              <div className={styles.nodeGhostSlots}>{slotCount} new slot{slotCount !== 1 ? 's' : ''} needed (repurposing frees one)</div>
-            </div>
-          ) : (
-            <div className={styles.nodeGhostSlots}>{slotCount} new slot{slotCount !== 1 ? 's' : ''} needed</div>
-          )}
         </div>
       )
     }
