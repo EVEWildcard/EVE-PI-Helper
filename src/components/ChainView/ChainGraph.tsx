@@ -253,6 +253,18 @@ function getP0Roots(name: string, visited = new Set<string>()): string[] {
   return Array.from(new Set(inputs.flatMap(i => getP0Roots(i, new Set(visited)))))
 }
 
+/** Flood a directed adjacency map from `start`, accumulating into `seed`. Shared
+ *  by the hover-focus and legend-pin highlight computations. */
+function reachClosure(start: string[], adj: Map<string, Set<string>>, seed: Set<string>): Set<string> {
+  const seen = seed
+  const stack = [...start]
+  while (stack.length) {
+    const k = stack.pop()!
+    for (const n of adj.get(k) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n) }
+  }
+  return seen
+}
+
 /** All product names in a chain: the product plus every recursive input. */
 function collectChainNames(name: string, acc = new Set<string>()): Set<string> {
   if (acc.has(name)) return acc
@@ -467,24 +479,34 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   }, [edges])
   const connectedSet = useMemo(() => {
     if (hoveredKey === null) return null
-    const closure = (start: string[], adj: Map<string, Set<string>>, seed: Set<string>) => {
-      const seen = seed
-      const stack = [...start]
-      while (stack.length) {
-        const k = stack.pop()!
-        for (const n of adj.get(k) ?? []) if (!seen.has(n)) { seen.add(n); stack.push(n) }
-      }
-      return seen
-    }
     if (singleChain) {
       // Path THROUGH the node: its ancestors plus its descendants (no siblings),
       // so hovering a mid node in a one-chain view actually narrows the focus.
-      const up = closure([hoveredKey], bwd, new Set([hoveredKey]))
-      return closure([hoveredKey], fwd, up)
+      const up = reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
+      return reachClosure([hoveredKey], fwd, up)
     }
-    const down = closure([hoveredKey], fwd, new Set([hoveredKey])) // descendants + self
-    return closure([...down], bwd, new Set(down))                  // + all their ancestors
+    const down = reachClosure([hoveredKey], fwd, new Set([hoveredKey])) // descendants + self
+    return reachClosure([...down], bwd, new Set(down))                  // + all their ancestors
   }, [hoveredKey, fwd, bwd, singleChain])
+
+  // Legend click-to-pin: clicking an alt in the legend persistently focuses just
+  // that alt's sub-chain (its planets plus everything up/downstream they connect
+  // to). Hovering a node still overrides it transiently; click the alt again to
+  // clear. Cleared automatically if its alt leaves the graph.
+  const [pinnedAltId, setPinnedAltId] = useState<number | null>(null)
+  const pinnedSet = useMemo(() => {
+    if (pinnedAltId == null) return null
+    const seeds = nodes.filter(n =>
+      n.characterId === pinnedAltId ||
+      (n.isCluster ? !!n.clusterMembers?.some(m => m.characterId === pinnedAltId) : false)
+    ).map(n => n.key)
+    if (seeds.length === 0) return null
+    const down = reachClosure(seeds, fwd, new Set(seeds))
+    return reachClosure([...down], bwd, new Set(down))
+  }, [pinnedAltId, nodes, fwd, bwd])
+  useEffect(() => {
+    if (pinnedAltId != null && !characters.some(c => c.characterId === pinnedAltId)) setPinnedAltId(null)
+  }, [characters, pinnedAltId])
 
   // Layout math lives in ./chainLayout (pure). These thin closures bind the
   // current node set so call sites stay terse.
@@ -582,8 +604,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
       })()
     : null
 
-  // What's currently emphasized — a hovered warning or suggestion wins over a hovered node.
-  const highlight = warnKeys ?? suggestKeys ?? connectedSet
+  // What's currently emphasized — a hovered warning or suggestion wins over a
+  // hovered node, which in turn wins over a click-pinned alt (the persistent base).
+  const highlight = warnKeys ?? suggestKeys ?? connectedSet ?? pinnedSet
 
   // Alt color for a node key (node border tint + hovered-chain arrow tint at scale).
   const altColorOf = (key: string): string | undefined => {
@@ -604,17 +627,26 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
       })()
     : []
 
+  const togglePin = (id: number) => setPinnedAltId(prev => (prev === id ? null : id))
   const renderAltRows = (list: StoredCharacter[]) =>
     list.slice()
       .sort((a, b) => (b.piSkills.interplanetaryConsolidation - a.piSkills.interplanetaryConsolidation) || (b.planets.length - a.planets.length))
       .map(c => {
         const color = charColorByCharId.get(c.characterId)
         if (!color) return null
+        const pinned = pinnedAltId === c.characterId
         return (
-          <div key={c.characterId} className={styles.legendRow}>
+          <button
+            key={c.characterId}
+            type="button"
+            className={`${styles.legendRow} ${styles.legendRowClickable} ${pinned ? styles.legendRowPinned : ''}`}
+            onClick={() => togglePin(c.characterId)}
+            title={pinned ? 'Click to clear the focus' : `Focus ${c.characterName}'s chain`}
+          >
             <span className={styles.legendDot} style={{ background: color }} />
             <span className={styles.legendName}>{c.characterName}</span>
-          </div>
+            {pinned && <span className={styles.legendPinMark}>📌</span>}
+          </button>
         )
       })
 

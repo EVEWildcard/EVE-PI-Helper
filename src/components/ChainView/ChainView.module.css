@@ -776,6 +776,27 @@
   gap: 7px;
 }
 
+/* Clickable legend rows pin focus to an alt's sub-chain. The legend itself is
+   pointer-events:none (so the graph stays hoverable through it); re-enable it
+   on the rows only. */
+.legendRowClickable {
+  pointer-events: auto;
+  width: 100%;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.legendRowClickable:hover { background: var(--bg-hover, rgba(255,255,255,0.05)); }
+.legendRowPinned {
+  border-color: var(--accent, #4ab095);
+  background: var(--bg-hover, rgba(255,255,255,0.05));
+}
+.legendPinMark { margin-left: auto; font-size: 9px; line-height: 1; }
+
 .legendDot {
   width: 8px;
   height: 8px;
