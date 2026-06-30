@@ -861,6 +861,83 @@
   font-family: var(--font);
 }
 
+/* ── Product overview node (LOD: one card per product) ── */
+
+.prodNode {
+  /* slightly tinted by status accent so problems read at a glance */
+  background: color-mix(in srgb, var(--node-border) 7%, var(--bg-card));
+}
+.prodNodeImported {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.prodHeader {
+  padding: 7px 10px 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prodTierBadge {
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.prodName {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.prodCount {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
+.prodStats {
+  padding: 0 10px 6px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prodStatus {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.prodRate {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.prodBar {
+  height: 3px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.prodBarFill {
+  height: 100%;
+  transition: width 0.2s;
+}
+
 /* ── Empty state ── */
 
 .empty {

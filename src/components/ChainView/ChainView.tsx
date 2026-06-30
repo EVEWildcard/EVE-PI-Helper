@@ -1,15 +1,18 @@
 import React, { useMemo, useState } from 'react'
 import type { StoredCharacter } from '../../types/api'
 import { ChainGraph } from './ChainGraph'
+import { ProductGraph } from './ProductGraph'
 import { ChainTerminalList } from './ChainTerminalList'
 import { buildChainModel } from './chainModel'
 import styles from './ChainView.module.css'
 
 // Container for the Production Chain tab. Default view is the ISK-ranked
-// chain-terminal LIST (design v2); the full combined graph is the "see
-// everything" escape hatch; clicking a terminal drills into that one chain.
+// chain-terminal LIST (design v2). "See everything" lands on the product
+// OVERVIEW (one card per product — bounded node count, readable at any empire
+// size); from there "Show every planet" drops to the raw per-planet graph.
+// Clicking a terminal drills into that one chain.
 
-type ViewMode = 'chains' | 'graph'
+type ViewMode = 'chains' | 'overview' | 'graph'
 
 interface Props {
   characters: StoredCharacter[]
@@ -84,20 +87,33 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
         focusTitle={title}
         suggestionsAllowed={false}
         singleChain
-        onSeeEverything={() => { setFocusTypeId(null); go('graph') }}
+        onSeeEverything={() => { setFocusTypeId(null); go('overview') }}
       />
     )
   }
 
-  // Escape hatch — the full combined graph (today's view).
+  // "See everything" — the product overview (bounded, readable at any scale).
+  if (mode === 'overview') {
+    return (
+      <ProductGraph
+        characters={characters}
+        prices={prices}
+        onBack={() => go('chains')}
+        backLabel="Chains"
+        onShowPlanets={() => go('graph')}
+      />
+    )
+  }
+
+  // Escape hatch — the full per-planet graph (heavier; detail when you want it).
   if (mode === 'graph') {
     return (
       <ChainGraph
         characters={characters}
         prices={prices}
         onRefresh={onRefresh}
-        onBack={() => go('chains')}
-        backLabel="Chains"
+        onBack={() => go('overview')}
+        backLabel="Overview"
       />
     )
   }
@@ -108,7 +124,7 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
       characters={characters}
       prices={prices}
       onFocusChain={setFocusTypeId}
-      onSeeEverything={() => go('graph')}
+      onSeeEverything={() => go('overview')}
     />
   )
 }

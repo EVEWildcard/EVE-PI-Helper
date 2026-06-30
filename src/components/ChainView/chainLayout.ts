@@ -56,6 +56,10 @@ export interface ChainNode {
   // P1 cluster nodes
   isCluster?: true
   clusterMembers?: ClusterMember[]
+  // product-overview nodes (LOD: one node per product, not per planet). The
+  // ProductFlow display data is held separately, keyed by node.key, so this
+  // module stays free of any chainModel dependency.
+  isProduct?: true
   // ghost nodes
   suggested?: true
   suggestion?: ChainSuggestion   // set on both main and step ghost nodes
