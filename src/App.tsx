@@ -37,7 +37,6 @@ export default function App() {
     loading,
     addCharacter,
     importCharacter,
-    refreshCharacter,
     removeCharacter,
     updateCharacterSkills,
     setSkillOverrides,

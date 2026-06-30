@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { StoredCharacter, PISkillLevels, Planet } from '../types/api'
+import type { StoredCharacter, PISkillLevels } from '../types/api'
 
 export function useCharacters() {
   const [characters, setCharacters] = useState<StoredCharacter[]>([])
@@ -107,7 +107,7 @@ export function useCharacters() {
     })
   }, [])
 
-  const refreshCharacter = useCallback(async (characterId: number) => {
+  const refreshCharacter = useCallback(async (_characterId: number) => {
     const updated = await window.api.importCharacter('')
     setCharacters((prev) =>
       prev.map((c) => c.characterId === updated.characterId ? updated : c)

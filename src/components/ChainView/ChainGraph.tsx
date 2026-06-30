@@ -462,7 +462,6 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     return m
   }, [edges, nodeTerminal])
 
-  const hasUnassigned = nodes.some(n => n.unassigned)
   const maxAssignedCol = nodes.filter(n => !n.unassigned).reduce((m, n) => Math.max(m, n.column), -1)
 
   // Hover-focus: highlight the WHOLE chain the hovered node participates in, dim
@@ -976,7 +975,7 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
             <span className={styles.nodeClusterTitle}>Extractors ×{node.clusterMembers.length}</span>
           </div>
           <div className={styles.nodeClusterRows}>
-            {charOrder.map((charId, ci) => {
+            {charOrder.map((charId) => {
               const members = byChar.get(charId)!
               const color = charColorByCharId.get(charId) ?? '#aaa'
               return (

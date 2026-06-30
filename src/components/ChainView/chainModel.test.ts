@@ -1,0 +1,163 @@
+import { describe, it, expect } from 'vitest'
+import type { Planet, StoredCharacter } from '../../types/api'
+import { DEFAULT_PI_SKILLS } from '../../types/api'
+import { PRODUCT_BY_NAME } from '../../data/schematics'
+import { buildChainModel, planetKey } from './chainModel'
+
+// ── fixture helpers ─────────────────────────────────────────────────────────
+// buildChainModel reads numeric `outputs` (typeIds) + `factoryCount`, so resolve
+// names to typeIds here for readable test setups.
+function tid(name: string): number {
+  const p = PRODUCT_BY_NAME.get(name)
+  if (!p) throw new Error(`unknown product ${name}`)
+  return p.typeId
+}
+
+let pid = 1
+function planet(name: string, outputs: string[], factoryCount = 1): Planet {
+  return { planetId: pid++, type: 'barren', name, outputs: outputs.map(tid), factoryCount }
+}
+
+let cid = 1
+function char(characterName: string, planets: Planet[], ic = 0): StoredCharacter {
+  return {
+    characterId: cid++,
+    characterName,
+    piSkills: { ...DEFAULT_PI_SKILLS, interplanetaryConsolidation: ic },
+    planets,
+  }
+}
+
+// Price table by product name → keyed by typeId for buildChainModel.
+function prices(table: Record<string, number>): Record<number, number> {
+  const out: Record<number, number> = {}
+  for (const [name, p] of Object.entries(table)) out[tid(name)] = p
+  return out
+}
+
+describe('buildChainModel — terminals', () => {
+  it('flags the end product as the only terminal of a healthy P1→P2 chain', () => {
+    const ext = char('Ext', [planet('E', ['Silicon', 'Chiral Structures'])])
+    const fac = char('Fac', [planet('F', ['Miniature Electronics'])])
+
+    const model = buildChainModel([ext, fac], prices({ 'Miniature Electronics': 1000 }))
+
+    expect(model.terminals.map(t => t.product.name)).toEqual(['Miniature Electronics'])
+    const t = model.terminals[0]
+    expect(t.broken).toBe(false)
+    expect(t.realizedFraction).toBeCloseTo(1, 5)
+    expect(t.missingInputs).toEqual([])
+    // Silicon + Chiral are consumed, so they're upstream — not terminals.
+    expect(t.upstreamProducts).toEqual(
+      expect.arrayContaining(['Silicon', 'Chiral Structures']),
+    )
+    // intended = nameplate supply × price; running at 100% ⇒ now == intended.
+    expect(t.iskHrIntended).toBeGreaterThan(0)
+    expect(t.iskHrNow).toBeCloseTo(t.iskHrIntended, 5)
+  })
+
+  it('exposes producer keys as charId:planetId for the terminal', () => {
+    const fac = char('Solo', [
+      planet('E', ['Silicon', 'Chiral Structures']),
+      planet('F', ['Miniature Electronics']),
+    ])
+    const model = buildChainModel([fac], prices({ 'Miniature Electronics': 10 }))
+    const t = model.terminals[0]
+    const fPlanet = fac.planets.find(p => p.name === 'F')!
+    expect(t.producerKeys).toEqual([planetKey(fac.characterId, fPlanet.planetId)])
+  })
+
+  it('ranks terminals by intended ISK/hr, descending', () => {
+    // Two independent terminals; Mini Electronics priced far above Coolant.
+    const a = char('A', [
+      planet('Ea', ['Silicon', 'Chiral Structures']),
+      planet('Fa', ['Miniature Electronics']),
+    ])
+    const b = char('B', [
+      planet('Eb', ['Water', 'Electrolytes']),
+      planet('Fb', ['Coolant']),
+    ])
+    const model = buildChainModel([a, b], prices({ 'Miniature Electronics': 1000, Coolant: 1 }))
+    expect(model.terminals.map(t => t.product.name)).toEqual(['Miniature Electronics', 'Coolant'])
+    expect(model.terminals[0].iskHrIntended).toBeGreaterThan(model.terminals[1].iskHrIntended)
+  })
+})
+
+describe('buildChainModel — broken & bottleneck', () => {
+  it('marks a chain broken when an input is never produced', () => {
+    // Factory wants Silicon + Chiral, but only Silicon is extracted anywhere.
+    const ext = char('Ext', [planet('E', ['Silicon'])])
+    const fac = char('Fac', [planet('F', ['Miniature Electronics'])])
+
+    const model = buildChainModel([ext, fac], prices({ 'Miniature Electronics': 1000 }))
+    const t = model.terminals.find(t => t.product.name === 'Miniature Electronics')!
+
+    expect(t.broken).toBe(true)
+    expect(t.missingInputs).toContain('Chiral Structures')
+    expect(t.realizedFraction).toBe(0)
+    expect(t.iskHrNow).toBe(0)
+    expect(t.iskHrIntended).toBeGreaterThan(0) // intended is honest even while broken
+  })
+
+  it('detects a starved input as the bottleneck and throttles realized output', () => {
+    // One Silicon extractor feeds two Miniature Electronics factories (2× demand),
+    // so Silicon availability ≈ 0.5 and caps the terminal's realized fraction.
+    const ext = char('Ext', [planet('Esi', ['Silicon']), planet('Ech', ['Chiral Structures'])])
+    const fac = char('Fac', [planet('F', ['Miniature Electronics'], 2)])
+
+    const model = buildChainModel([ext, fac], prices({ 'Miniature Electronics': 1000 }))
+    const t = model.terminals[0]
+
+    expect(t.broken).toBe(false)
+    expect(t.realizedFraction).toBeCloseTo(0.5, 5)
+    expect(t.bottleneck?.name).toBe('Silicon')
+    expect(t.bottleneck!.ratio).toBeCloseTo(0.5, 5)
+    expect(t.iskHrNow).toBeCloseTo(t.iskHrIntended * 0.5, 5)
+  })
+})
+
+describe('buildChainModel — flows', () => {
+  it('balances supply and demand on a fully-fed P1 input', () => {
+    const ext = char('Ext', [planet('E', ['Silicon', 'Chiral Structures'])])
+    const fac = char('Fac', [planet('F', ['Miniature Electronics'])])
+    const model = buildChainModel([ext, fac], prices({ 'Miniature Electronics': 1 }))
+
+    const silicon = model.flows.get(tid('Silicon'))!
+    expect(silicon.supply).toBeCloseTo(silicon.demand, 5)
+    expect(silicon.ratio).toBeCloseTo(1, 5)
+    expect(silicon.status).toBe('ok')
+
+    const mini = model.flows.get(tid('Miniature Electronics'))!
+    expect(mini.demand).toBe(0)
+    expect(mini.status).toBe('terminal')
+  })
+})
+
+describe('buildChainModel — opportunities', () => {
+  it('suggests extending a P2 terminal to a higher tier when slots are free', () => {
+    // Solo alt with IC 5 (→ 6 planet cap) using only 2 planets ⇒ 4 spare slots.
+    const solo = char('Solo', [
+      planet('E', ['Silicon', 'Chiral Structures']),
+      planet('F', ['Miniature Electronics']),
+    ], 5)
+    // Price a P3 that consumes Miniature Electronics (Planetary Vehicles / Smartfab).
+    const model = buildChainModel([solo], prices({
+      'Miniature Electronics': 100,
+      'Smartfab Units': 5000,
+      'Planetary Vehicles': 1000,
+    }))
+    const t = model.terminals.find(t => t.product.name === 'Miniature Electronics')!
+    expect(t.canExtend).toBeDefined()
+    expect(t.canExtend!.toTier).toBe('P3')
+    // Picks the higher-priced consumer.
+    expect(t.canExtend!.toProduct).toBe('Smartfab Units')
+  })
+
+  it('does not offer to extend when there are no spare planet slots', () => {
+    // IC 0 ⇒ 1 planet cap, 1 planet used ⇒ 0 spare. (Demand-free P1 is its own terminal.)
+    const solo = char('Solo', [planet('E', ['Silicon'])], 0)
+    const model = buildChainModel([solo], prices({ Silicon: 100, 'Miniature Electronics': 5000 }))
+    const t = model.terminals.find(t => t.product.name === 'Silicon')
+    expect(t?.canExtend).toBeUndefined()
+  })
+})

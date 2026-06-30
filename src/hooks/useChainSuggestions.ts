@@ -214,14 +214,15 @@ function buildChainSteps(
 
 // ── Main hook ─────────────────────────────────────────────────────────────────
 
-export function useChainSuggestions(
+// Pure core of the suggestion engine, extracted from the hook so it can be unit-tested
+// without a React renderer. The hook is a thin `useMemo` wrapper around this.
+export function computeChainSuggestions(
   characters: StoredCharacter[],
   prices: Record<number, number>,
   assumeMaxSkills: boolean,
   systemPlanets: SystemPlanetsMap,
   maxSuggestions = 1
 ): ChainSuggestion[] {
-  return useMemo(() => {
     if (characters.length === 0 || Object.keys(prices).length === 0) return []
 
     const allSchematics = [...P1_TO_P2_SCHEMATICS, ...P2_TO_P3_SCHEMATICS, ...P3_TO_P4_SCHEMATICS]
@@ -585,7 +586,19 @@ export function useChainSuggestions(
         return b.iskHr - a.iskHr
       })
       .slice(0, maxSuggestions)
-  }, [characters, prices, assumeMaxSkills, systemPlanets, maxSuggestions])
+}
+
+export function useChainSuggestions(
+  characters: StoredCharacter[],
+  prices: Record<number, number>,
+  assumeMaxSkills: boolean,
+  systemPlanets: SystemPlanetsMap,
+  maxSuggestions = 1
+): ChainSuggestion[] {
+  return useMemo(
+    () => computeChainSuggestions(characters, prices, assumeMaxSkills, systemPlanets, maxSuggestions),
+    [characters, prices, assumeMaxSkills, systemPlanets, maxSuggestions],
+  )
 }
 
 export { formatTrainTime }
@@ -599,11 +612,9 @@ export interface BalanceHint {
   consumers: number   // planets consuming this as input
 }
 
-export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
-  return useMemo(() => {
+// Pure core, extracted for unit testing (see `computeChainSuggestions`).
+export function computeBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
     if (characters.length === 0) return []
-
-    const allSchematics = [...P1_TO_P2_SCHEMATICS, ...P2_TO_P3_SCHEMATICS, ...P3_TO_P4_SCHEMATICS]
 
     // Count how many planets produce each product
     const producerCount = new Map<string, number>()
@@ -639,5 +650,8 @@ export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
 
     // Surface the most extreme imbalance first
     return hints.sort((a, b) => Math.abs(b.consumers - b.producers) - Math.abs(a.consumers - a.producers))
-  }, [characters])
+}
+
+export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
+  return useMemo(() => computeBalanceHints(characters), [characters])
 }
