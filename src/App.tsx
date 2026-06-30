@@ -227,7 +227,7 @@ export default function App() {
               title={`Jita prices from Fuzzwork. Next refresh in ~${Math.ceil((1 - priceProgress) * 30)}m`}
             >
               <PriceRing progress={priceProgress} />
-              Prices @ {new Date(lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              Live prices · {new Date(lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
             <span className={styles.statusSep}>|</span>
           </>
