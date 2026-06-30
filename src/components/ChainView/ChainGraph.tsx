@@ -838,6 +838,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               key={node.key}
               node={node}
               producedNames={producedNames}
+              importedNames={chainModel.importedNames}
               consumedOutputs={primaryConsumedByNode.get(node.key) ?? new Set()}
               feedsLabel={nodeTerminal.get(node.key) !== node.key ? (terminalNameByKey.get(nodeTerminal.get(node.key) ?? '') ?? null) : null}
               x={pos.x}
@@ -922,6 +923,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 interface PlanetNodeProps {
   node: ChainNode
   producedNames: Set<string>
+  importedNames: Set<string>
   consumedOutputs: Set<string>
   feedsLabel: string | null
   x: number
@@ -938,7 +940,7 @@ interface PlanetNodeProps {
 }
 
 const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
-  function PlanetNode({ node, producedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, tierMode, charColorByCharId, onHover, onInputRef }, ref) {
+  function PlanetNode({ node, producedNames, importedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, tierMode, charColorByCharId, onHover, onInputRef }, ref) {
     const dotColor = PLANET_COLOR[node.planetType] ?? '#404050'
 
     // P1 cluster node: grouped by P2 consumer, sub-divided by character inside
@@ -1047,10 +1049,17 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
           const renderInput = (name: string) => {
             const covered = producedNames.has(name)
             const isSelfExtracted = PRODUCT_BY_NAME.get(name)?.tier === 'P0'
-            const cls = isSelfExtracted ? styles.nodeInputSelf : covered ? styles.nodeInputCovered : styles.nodeInputMissing
+            // Not produced anywhere, but not a genuine gap either — you buy/haul it in.
+            const isImported = !covered && !isSelfExtracted && importedNames.has(name)
+            const cls = isSelfExtracted ? styles.nodeInputSelf
+              : covered ? styles.nodeInputCovered
+              : isImported ? styles.nodeInputImported
+              : styles.nodeInputMissing
             const title = isSelfExtracted
               ? `Extracted on this planet (P0 → P1)`
-              : covered ? `Supplied by another planet` : getMissingInputHint(name)
+              : covered ? `Supplied by another planet`
+              : isImported ? `Imported — bought or hauled in, not produced from your own chain`
+              : getMissingInputHint(name)
             return (
               <span key={name} ref={el => onInputRef?.(name, el)}
                 className={`${styles.nodeInput} ${cls}`} title={title}>{name}</span>

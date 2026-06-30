@@ -273,6 +273,12 @@
   opacity: 0.7;
 }
 
+.nodeInputImported {
+  color: #8a93a8;
+  background: rgba(138, 147, 168, 0.08);
+  border: 1px dashed rgba(138, 147, 168, 0.45);
+}
+
 .nodeChainLabel {
   padding: 3px 10px 2px;
   font-size: 9px;

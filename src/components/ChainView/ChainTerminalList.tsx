@@ -55,7 +55,7 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
         {terminals.length > 0 && terminals.length <= 4 && (
           <div className={styles.teach}>
             <p>Each row is a <strong>chain</strong> — an end product you sell — ranked by ISK/hr.</p>
-            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> at full. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an input can’t keep up — the % is how much of full speed you’re running. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it.</p>
+            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> at full. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an input can’t keep up — the % is how much of full speed you’re running. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it. <span className={styles.teachDot} style={{ background: '#8a93a8' }} /> <strong>Imports</strong>: inputs you buy or haul in rather than produce — assumed available, so the chain still runs.</p>
             <p>Click a chain to open just its graph; <strong>See everything</strong> shows the whole empire.</p>
           </div>
         )}
@@ -98,6 +98,14 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
                 )}
                 {health === 'noprice' && (
                   <span className={`${styles.pill} ${styles.pillMuted}`}>no market price</span>
+                )}
+                {t.importedInputs.length > 0 && (
+                  <span
+                    className={`${styles.pill} ${styles.pillImport}`}
+                    title={`Bought or hauled in (not produced from your own chain): ${t.importedInputs.join(', ')}`}
+                  >
+                    📦 Imports: {t.importedInputs.slice(0, 2).join(', ')}{t.importedInputs.length > 2 ? ` +${t.importedInputs.length - 2}` : ''}
+                  </span>
                 )}
                 {t.canExtend && (
                   <span

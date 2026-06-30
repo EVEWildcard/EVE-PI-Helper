@@ -190,6 +190,7 @@
 .pillMuted      { color: var(--text-muted); background: transparent; border: 1px dashed var(--border); }
 .pillExtend     { color: #4a90c8; background: rgba(74,144,200,0.10);  border: 1px solid rgba(74,144,200,0.35); }
 .pillSell       { color: #c8a030; background: rgba(200,160,48,0.10); border: 1px solid rgba(200,160,48,0.30); }
+.pillImport     { color: #8a93a8; background: rgba(138,147,168,0.10); border: 1px solid rgba(138,147,168,0.30); }
 
 .iskCol {
   display: flex;

@@ -84,16 +84,50 @@ describe('buildChainModel — terminals', () => {
 })
 
 describe('buildChainModel — broken & bottleneck', () => {
-  it('marks a chain broken when an input is never produced', () => {
-    // Factory wants Silicon + Chiral, but only Silicon is extracted anywhere.
+  it('treats a never-produced P1 input as imported, not broken (you buy it in)', () => {
+    // Factory wants Silicon + Chiral; only Silicon is extracted. A P1 has no
+    // sub-chain to half-build, so the missing one is assumed bought/hauled in.
     const ext = char('Ext', [planet('E', ['Silicon'])])
     const fac = char('Fac', [planet('F', ['Miniature Electronics'])])
 
     const model = buildChainModel([ext, fac], prices({ 'Miniature Electronics': 1000 }))
     const t = model.terminals.find(t => t.product.name === 'Miniature Electronics')!
 
+    expect(t.broken).toBe(false)
+    expect(t.missingInputs).toEqual([])
+    expect(t.importedInputs).toContain('Chiral Structures')
+    expect(t.realizedFraction).toBeCloseTo(1, 5)
+    expect(t.iskHrNow).toBeCloseTo(t.iskHrIntended, 5)
+    expect(model.importedNames.has('Chiral Structures')).toBe(true)
+  })
+
+  it('treats a factory-only empire (no extractors) as fully import-fed, never broken', () => {
+    // The classic case: only a P2 factory, no P1 extraction anywhere. Both inputs are
+    // imports, so nothing is broken and the chain runs at full intended ISK/hr.
+    const fac = char('Fac', [planet('F', ['Miniature Electronics'])])
+    const model = buildChainModel([fac], prices({ 'Miniature Electronics': 1000 }))
+    const t = model.terminals[0]
+
+    expect(t.broken).toBe(false)
+    expect(t.importedInputs).toEqual(expect.arrayContaining(['Silicon', 'Chiral Structures']))
+    expect(t.missingInputs).toEqual([])
+    expect(t.iskHrNow).toBeCloseTo(t.iskHrIntended, 5)
+  })
+
+  it('marks a chain broken only at a genuine gap: a P2 you half-build but never finish', () => {
+    // You extract Silicon + Chiral (Miniature Electronics' feeders) but never build the
+    // Miniature Electronics factory, while running a Smartfab Units (P3) terminal that
+    // needs it. That missing P2 is a real gap ⇒ broken. Construction Blocks — whose own
+    // feeders you don't make — is an import, not a gap.
+    const ext = char('Ext', [planet('E', ['Silicon', 'Chiral Structures'])])
+    const fac = char('Fac', [planet('F', ['Smartfab Units'])])
+
+    const model = buildChainModel([ext, fac], prices({ 'Smartfab Units': 5000 }))
+    const t = model.terminals.find(t => t.product.name === 'Smartfab Units')!
+
     expect(t.broken).toBe(true)
-    expect(t.missingInputs).toContain('Chiral Structures')
+    expect(t.missingInputs).toContain('Miniature Electronics')
+    expect(t.importedInputs).toContain('Construction Blocks')
     expect(t.realizedFraction).toBe(0)
     expect(t.iskHrNow).toBe(0)
     expect(t.iskHrIntended).toBeGreaterThan(0) // intended is honest even while broken

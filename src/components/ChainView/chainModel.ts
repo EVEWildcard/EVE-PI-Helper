@@ -39,7 +39,11 @@ import {
 
 const TIER_RANK: Record<PITier, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
 
-export type ProductStatus = 'terminal' | 'ok' | 'excess' | 'bottleneck' | 'missing'
+// 'missing'  — a genuine gap: you build some of this input's own feeders but not
+//              the input itself (a dangling, half-built sub-chain) ⇒ chain BROKEN.
+// 'imported' — you produce none of this input's sub-chain ⇒ you buy/haul it in by
+//              design (the classic factory-only setup). Assumed always available.
+export type ProductStatus = 'terminal' | 'ok' | 'excess' | 'bottleneck' | 'missing' | 'imported'
 
 export interface ProductFlow {
   typeId: number
@@ -51,7 +55,8 @@ export interface ProductFlow {
   realizedFraction: number  // rFrac — fraction of nameplate actually achievable given upstream
   status: ProductStatus
   producerKeys: string[]    // 'charId:planetId' of planets making this
-  missingInputs: string[]   // direct inputs this needs but you don't produce (non-P0)
+  missingInputs: string[]   // direct inputs that are a genuine gap (broken)
+  importedInputs: string[]  // direct inputs you buy/haul in by design (not broken)
 }
 
 export interface TerminalChain {
@@ -60,8 +65,9 @@ export interface TerminalChain {
   iskHrIntended: number        // ranking basis: nameplate capacity × price
   iskHrNow: number             // intended × realizedFraction ("0 now" when broken)
   realizedFraction: number
-  broken: boolean              // a required input somewhere upstream isn't produced
-  missingInputs: string[]      // product names required upstream but not produced
+  broken: boolean              // a required input somewhere upstream is a genuine gap
+  missingInputs: string[]      // product names that are a genuine gap (broken)
+  importedInputs: string[]     // product names you source externally (buy/haul) by design
   bottleneck?: { name: string; ratio: number }  // scarcest produced input limiting throughput
   upstreamProducts: string[]   // produced product names feeding this terminal (excl. itself)
   producerKeys: string[]       // planets producing the terminal product
@@ -76,6 +82,7 @@ export interface TerminalChain {
 export interface ChainModel {
   terminals: TerminalChain[]        // ranked by iskHrIntended desc
   flows: Map<number, ProductFlow>   // every produced/required product, keyed by typeId
+  importedNames: Set<string>        // products sourced externally by design (not gaps)
 }
 
 /** Stable node key shared with the layout graph ('charId:planetId'). */
@@ -122,6 +129,36 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     }
   }
 
+  // Is a non-produced input a genuine gap, or an intentional import?
+  //
+  // The signal of intent is whether you're building that input's supply yourself.
+  // `producesAnyUpstream(X)` = you produce at least one product somewhere in X's
+  // recipe sub-tree. If so, a missing X is a half-built chain you stopped short on
+  // ⇒ BROKEN. If you produce none of X's sub-tree, you're not building X at all and
+  // must be buying/hauling it in ⇒ IMPORTED (the factory-only setup). P0 inputs are
+  // self-extracted and never count, so a missing P1 (sub-tree is only P0) is always
+  // an import — there's no such thing as a "half-built" P1; you extract it or you buy it.
+  const upstreamCache = new Map<number, boolean>()
+  function producesAnyUpstream(tid: number): boolean {
+    const cached = upstreamCache.get(tid)
+    if (cached !== undefined) return cached
+    upstreamCache.set(tid, false)  // guard against recipe cycles
+    let result = false
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
+    if (sch) {
+      for (const inp of sch.inputs) {
+        const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
+        if (!ip || ip.tier === 'P0') continue
+        if (producedTypeIds.has(inp.typeId) || producesAnyUpstream(inp.typeId)) { result = true; break }
+      }
+    }
+    upstreamCache.set(tid, result)
+    return result
+  }
+  /** A required-but-not-produced input: 'imported' (by design) vs 'missing' (broken gap). */
+  const isImported = (tid: number) => !producesAnyUpstream(tid)
+  const importedNames = new Set<string>()
+
   // Build a flow record for every product that's either produced or required.
   const flows = new Map<number, ProductFlow>()
   for (const tid of new Set<number>([...supply.keys(), ...demand.keys()])) {
@@ -137,6 +174,7 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       status: 'ok',
       producerKeys: producerKeys.get(tid) ?? [],
       missingInputs: [],
+      importedInputs: [],
     })
   }
 
@@ -152,23 +190,30 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     const sch = SCHEMATIC_BY_OUTPUT.get(tid)
     let frac = 1
     const missing: string[] = []
+    const imported: string[] = []
     if (sch) {
       for (const inp of sch.inputs) {
         const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
         if (!ip || ip.tier === 'P0') continue
-        if (!producedTypeIds.has(inp.typeId)) { frac = 0; missing.push(ip.name); continue }
+        if (!producedTypeIds.has(inp.typeId)) {
+          // Imported inputs are assumed available (bought/hauled) — they don't break
+          // or throttle the chain; only a genuine gap forces realized fraction to 0.
+          if (isImported(inp.typeId)) { imported.push(ip.name); importedNames.add(ip.name) }
+          else { frac = 0; missing.push(ip.name) }
+          continue
+        }
         const inFlow = flows.get(inp.typeId)!
         frac = Math.min(frac, inFlow.ratio * (rFrac.get(inp.typeId) ?? 1))
       }
     }
     rFrac.set(tid, frac)
     const f = flows.get(tid)
-    if (f) { f.realizedFraction = frac; f.missingInputs = missing }
+    if (f) { f.realizedFraction = frac; f.missingInputs = missing; f.importedInputs = imported }
   }
 
   // Classify every flow.
   for (const f of flows.values()) {
-    if (!producedTypeIds.has(f.typeId)) { f.status = 'missing'; continue }
+    if (!producedTypeIds.has(f.typeId)) { f.status = isImported(f.typeId) ? 'imported' : 'missing'; continue }
     if (f.demand === 0) { f.status = 'terminal'; continue }
     if (f.supply < f.demand * 0.999) f.status = 'bottleneck'
     else if (f.supply > f.demand * 1.001) f.status = 'excess'
@@ -201,6 +246,7 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
 
     const upstream = new Set<number>()
     const missing = new Set<string>()
+    const imported = new Set<string>()
     let bottleneck: { name: string; ratio: number } | undefined
 
     const visit = (t: number) => {
@@ -209,7 +255,13 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       for (const inp of sch.inputs) {
         const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
         if (!ip || ip.tier === 'P0') continue
-        if (!producedTypeIds.has(inp.typeId)) { missing.add(ip.name); continue }
+        if (!producedTypeIds.has(inp.typeId)) {
+          // Stop at this sourcing leaf: an imported product is bought finished, so its
+          // own sub-inputs aren't ours to track.
+          if (isImported(inp.typeId)) imported.add(ip.name)
+          else missing.add(ip.name)
+          continue
+        }
         if (upstream.has(inp.typeId)) continue
         upstream.add(inp.typeId)
         const fl = flows.get(inp.typeId)
@@ -265,6 +317,7 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       realizedFraction: frac,
       broken: frac === 0,
       missingInputs: [...missing],
+      importedInputs: [...imported],
       bottleneck,
       upstreamProducts: [...upstream].map(t => PRODUCT_BY_TYPE_ID.get(t)!.name),
       producerKeys: producerKeys.get(tid) ?? [],
@@ -275,5 +328,5 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
 
   terminals.sort((a, b) => b.iskHrIntended - a.iskHrIntended || a.product.name.localeCompare(b.product.name))
 
-  return { terminals, flows }
+  return { terminals, flows, importedNames }
 }
