@@ -27,6 +27,15 @@ function formatSplit(splits: { name: string; share: number }[]): string {
   return splits.map(word).join(' · ')
 }
 
+/** Phrase a receiving alt's share of a split deposit, for the "grab your half"
+ *  pickup reminder. Even 2-/3-way splits read naturally; anything else falls back
+ *  to an approximate percentage. */
+function grabSharePhrase(share: number, parts: number): string {
+  if (parts === 2 && Math.abs(share - 0.5) < 0.02) return 'grab your half'
+  if (parts === 3 && Math.abs(share - 1 / 3) < 0.02) return 'grab your third'
+  return `grab your share (~${Math.round(share * 100)}%)`
+}
+
 /** How much of `material` a character consumes per cycle across all its factories. */
 function materialDemand(char: StoredCharacter, material: string): number {
   let q = 0
@@ -462,6 +471,20 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   const steps = useMemo(() => computeSteps(characters, now, frozenOrder), [characters, now, frozenOrder])
   const readyAt = useMemo(() => findReadyAt(characters), [characters])
 
+  // material → (receiving alt name → its share) for split deposits. Lets a
+  // receiving alt be reminded to grab only ITS half of a shared-container drop.
+  const splitShareByMaterial = useMemo(() => {
+    const m = new Map<string, Map<string, number>>()
+    for (const s of steps)
+      for (const d of s.deposits)
+        if (d.splits) {
+          const inner = m.get(d.material) ?? new Map<string, number>()
+          for (const sp of d.splits) inner.set(sp.name, sp.share)
+          m.set(d.material, inner)
+        }
+    return m
+  }, [steps])
+
   const [checked, setChecked] = useState<Set<string>>(loadChecked)
   const [active, setActive] = useState<number>(() => {
     const v = parseInt(localStorage.getItem(STORAGE_KEY_STEP) ?? '0', 10)
@@ -586,6 +609,10 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   const pickupMaterials = step
     ? [...new Set(step.stops.flatMap(s => s.inputs.filter(i => i.ready && !i.self).map(i => i.material)))]
     : []
+  // Of those, the ones that are split between multiple consumers — grab only your share.
+  const splitPickups = step
+    ? pickupMaterials.filter(m => splitShareByMaterial.get(m)?.has(step.char.characterName))
+    : []
 
   const activeDone = step ? stepDone(step) : false
 
@@ -679,7 +706,12 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
           {pickupMaterials.length > 0 && !activeDone && (
             <div className={styles.pickupCallout}>
               <span className={styles.pickupIcon}>📦</span>
-              <span><strong>Before undocking:</strong> pick up {pickupMaterials.join(', ')} from the shared container.</span>
+              <span>
+                <strong>Before undocking:</strong> pick up {pickupMaterials.join(', ')} from the shared container.
+                {splitPickups.length > 0 && (
+                  <span className={styles.splitGrab}> Grab only your share of {splitPickups.join(', ')} — it’s split with other alts.</span>
+                )}
+              </span>
             </div>
           )}
 
@@ -764,6 +796,8 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       {inputs.map(inp => {
                         const key = deliverKey(stop.planet, inp.material)
                         const done = isDone(key)
+                        const splitMap = inp.ready && !inp.self ? splitShareByMaterial.get(inp.material) : undefined
+                        const myShare = splitMap?.get(step.char.characterName)
                         return (
                           <label
                             key={inp.material}
@@ -777,7 +811,12 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                               {inp.self ? (
                                 <span className={styles.sourceNote}>from your own extractor</span>
                               ) : inp.ready ? (
-                                <span className={styles.sourceNote}>pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}</span>
+                                <span className={styles.sourceNote}>
+                                  pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}
+                                  {myShare != null && (
+                                    <span className={styles.splitGrab}> · {grabSharePhrase(myShare, splitMap!.size)}</span>
+                                  )}
+                                </span>
                               ) : (
                                 <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
                               )}

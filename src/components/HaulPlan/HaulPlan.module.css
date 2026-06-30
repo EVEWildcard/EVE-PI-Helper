@@ -361,6 +361,7 @@
 
 .sourceNote { font-size: 12px; color: var(--text-muted); }
 .splitLabel { color: var(--text-secondary); font-weight: 600; }
+.splitGrab { color: #c8a030; font-weight: 600; }
 .waitNote { font-size: 12px; color: #c8a030; font-weight: 600; }
 
 /* ── Timer ── */
