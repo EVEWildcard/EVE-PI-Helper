@@ -818,6 +818,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                   ? TIER_COLOR[node.outputTier]
                   : (charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])
               }
+              tierMode={manyAlts && !(highlight?.has(node.key))}
               charColorByCharId={charColorByCharId}
               onHover={setHoveredKey}
               onInputRef={(name, el) => {
@@ -879,13 +880,16 @@ interface PlanetNodeProps {
   hovered: boolean
   dimmed: boolean
   borderColor: string
+  /** When true (scale view, >4 alts, not in the hovered chain) color by product
+   *  tier instead of by alt — clusters honor this too, not just single nodes. */
+  tierMode: boolean
   charColorByCharId: Map<number, string>
   onHover: (key: string | null) => void
   onInputRef?: (name: string, el: HTMLSpanElement | null) => void
 }
 
 const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
-  function PlanetNode({ node, producedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, charColorByCharId, onHover, onInputRef }, ref) {
+  function PlanetNode({ node, producedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, tierMode, charColorByCharId, onHover, onInputRef }, ref) {
     const dotColor = PLANET_COLOR[node.planetType] ?? '#404050'
 
     // P1 cluster node: grouped by P2 consumer, sub-divided by character inside
@@ -897,17 +901,26 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
         if (!byChar.has(m.characterId)) { byChar.set(m.characterId, []); charOrder.push(m.characterId) }
         byChar.get(m.characterId)!.push(m)
       }
+      // In tier-mode the cluster colors by its product tier (P1) like every other
+      // node; otherwise it keeps the per-alt look (single alt → that alt's color,
+      // multiple → neutral border + a rainbow stripe of the contributing alts).
+      const clusterBorder = tierMode
+        ? borderColor
+        : (charOrder.length === 1 ? (charColorByCharId.get(charOrder[0]) ?? 'var(--border)') : 'var(--border)')
+      const clusterStripe = tierMode
+        ? borderColor
+        : `linear-gradient(90deg, ${charOrder.map(id => charColorByCharId.get(id) ?? '#aaa').join(', ')})`
       return (
         <div ref={ref}
           className={`${styles.node} ${styles.nodeCluster} ${hovered ? styles.nodeHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
           style={{ left: x, top: y, width: NODE_W,
-            '--node-glow': charOrder.length === 1 ? (charColorByCharId.get(charOrder[0]) ?? 'var(--border)') : 'var(--border)',
-            '--node-border': charOrder.length === 1 ? (charColorByCharId.get(charOrder[0]) ?? 'var(--border)') : 'var(--border)',
+            '--node-glow': clusterBorder,
+            '--node-border': clusterBorder,
           } as React.CSSProperties}
           onMouseEnter={() => onHover(node.key)}
           onMouseLeave={() => onHover(null)}
         >
-          <div className={styles.nodeTierStripe} style={{ background: `linear-gradient(90deg, ${charOrder.map(id => charColorByCharId.get(id) ?? '#aaa').join(', ')})` }} />
+          <div className={styles.nodeTierStripe} style={{ background: clusterStripe }} />
           <div className={styles.nodeClusterHeader}>
             <span className={styles.nodeClusterBadge}>P1</span>
             <span className={styles.nodeClusterTitle}>Extractors ×{node.clusterMembers.length}</span>
