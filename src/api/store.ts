@@ -166,8 +166,21 @@ export const store = {
   importCharacter(data: ImportedCharacter): StoredCharacter {
     const state = load()
     const id = data.characterId
+    const existing = state.characters.find(c => c.characterId === id)
+
+    // Preserve each planet's internal planetId across refreshes by matching on
+    // ESI's stable planet_id (esiPlanetId). Without this, every refresh mints a
+    // brand-new planetId, invalidating any planetId-keyed UI state — e.g. the
+    // Haul Plan's manual reset/delivery checkmarks would silently reset on the
+    // next ESI refresh.
+    const prevIdByEsi = new Map<number, number>()
+    for (const p of existing?.planets ?? [])
+      if (p.esiPlanetId != null) prevIdByEsi.set(p.esiPlanetId, p.planetId)
+
     const planets: Planet[] = data.planets.map(p => ({
-      planetId: state.nextPlanetId++,
+      planetId: (p.esiPlanetId != null && prevIdByEsi.has(p.esiPlanetId))
+        ? prevIdByEsi.get(p.esiPlanetId)!
+        : state.nextPlanetId++,
       ...(p.esiPlanetId != null ? { esiPlanetId: p.esiPlanetId } : {}),
       ...(p.systemId != null ? { systemId: p.systemId } : {}),
       type: p.type,
@@ -181,7 +194,6 @@ export const store = {
       ...(p.expiryTime ? { expiryTime: p.expiryTime } : {}),
     }))
 
-    const existing = state.characters.find(c => c.characterId === id)
     let skillOverrides: Partial<Record<keyof PISkillLevels, number>> | undefined
     if (existing?.skillOverrides) {
       const pruned: Partial<Record<keyof PISkillLevels, number>> = {}
