@@ -883,6 +883,24 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                 <div className={styles.legendHint}>colored by tier · hover a chain for alts</div>
               </div>
             )}
+            {/* Space-gated teaching: a sparse "See everything" graph has room to
+                explain its visual language; a dense one stays terse (the stats
+                line above already carries the one-line hint). */}
+            {!singleChain && nodes.length <= 10 && (
+              <div className={styles.legendTeach}>
+                <div className={styles.legendTeachRow}>
+                  <span className={styles.legendTeachFlow} /> healthy flow
+                </div>
+                <div className={styles.legendTeachRow}>
+                  <span className={styles.legendTeachIssue} /> balance issue — see Issues
+                </div>
+                <p className={styles.legendTeachText}>
+                  Cards are planets, arrows point from an input to the planet that uses it.
+                  Hover a card to light its whole chain; click an alt above to pin it.
+                  Hold <kbd className={styles.legendKbd}>Alt</kbd> to label every arrow.
+                </p>
+              </div>
+            )}
           </div>
         )}
         <TemplateSearch />
