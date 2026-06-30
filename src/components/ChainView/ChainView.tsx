@@ -9,7 +9,7 @@ import styles from './ChainView.module.css'
 // Container for the Production Chain tab. Default view is the ISK-ranked
 // chain-terminal LIST (design v2). "See everything" lands on the product
 // OVERVIEW (one card per product — bounded node count, readable at any empire
-// size); from there "Show every planet" drops to the raw per-planet graph.
+// size); from there "Per-planet detail" drops to the raw per-planet graph.
 // Clicking a terminal drills into that one chain.
 
 type ViewMode = 'chains' | 'overview' | 'graph'

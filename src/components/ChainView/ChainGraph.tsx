@@ -531,11 +531,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const maxAssignedCol = nodes.filter(n => !n.unassigned).reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Hover-focus: highlight the WHOLE chain the hovered node participates in, dim
-  // the rest. Walk DOWN to every terminal it feeds (descendants), then back UP
-  // from those to extraction (ancestors) — so a mid/high node lights just its
-  // chain, while a genuinely shared input lights every terminal it contributes
-  // to. (Plain undirected reachability over-merges via shared P1s.)
+  // Hover-focus: light the UPSTREAM supply feeding the hovered node — its
+  // ancestors back to extraction — and dim the rest. Downstream consumers are
+  // deliberately left out (hover them to see their own supply). The single-chain
+  // view instead lights the path THROUGH the node since there's only one chain.
   const { fwd, bwd } = useMemo(() => {
     const fwd = new Map<string, Set<string>>()
     const bwd = new Map<string, Set<string>>()
@@ -551,8 +550,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
       const up = reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
       return reachClosure([hoveredKey], fwd, up)
     }
-    const down = reachClosure([hoveredKey], fwd, new Set([hoveredKey])) // descendants + self
-    return reachClosure([...down], bwd, new Set(down))                  // + all their ancestors
+    // Hover lights only what flows UP INTO this node (its ancestors + self),
+    // never what it feeds. To inspect a downstream consumer, hover that node.
+    return reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
   }, [hoveredKey, fwd, bwd, singleChain])
 
   // Legend click-to-pin: clicking an alt in the legend persistently focuses just
@@ -798,11 +798,6 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             ← {backLabel}
           </button>
         )}
-        {onSeeEverything && (
-          <button className={styles.dirBtn} onClick={onSeeEverything} title="Render the full combined production graph">
-            See everything <span style={{ fontSize: 14 }}>⊞</span>
-          </button>
-        )}
         {focusTitle && <span className={styles.focusTitle}>{focusTitle}</span>}
         {suggestionsAllowed && (
           <label className={styles.maxSkillsLabel} title="Assume all characters have max PI skills (IPC 5)">
@@ -814,6 +809,11 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         {!isNarrow && view && (
           <button className={styles.dirBtn} onClick={() => setView(null)} title="Reset zoom & pan to fit the whole graph">
             Fit · {Math.round(v.zoom * 100)}%
+          </button>
+        )}
+        {onSeeEverything && (
+          <button className={styles.seeAllBtn} onClick={onSeeEverything} title="Render the full combined production graph">
+            See everything <span className={styles.seeAllIcon}>⊞</span>
           </button>
         )}
       </div>
@@ -919,34 +919,38 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
             const resting = highlight === null
             const connected = resting || (highlight.has(a.fromKey) && highlight.has(a.toKey))
-            // At rest the whole graph is faint so it reads as a quiet web; hovering
-            // a chain pops just that path to full strength and pushes the rest back.
-            const opacity = a.ghost ? 0.5
-              : isOrphaned ? 0.12
-              : resting ? 0.38
-              : connected ? 1
-              : 0.06
-            // Issue arrows go solid + a touch wider over a soft static red glow so
-            // the problem is visible without flashing.
             const problem = !a.ghost && a.label.split(', ').some(n => problemProducts.has(n))
-            const dashArray = a.ghost ? '4 6' : problem ? '0' : '6 4'
-            const baseWidth = connected && highlight ? 2.5 : 1.5
-            const strokeWidth = problem ? baseWidth + 1 : baseWidth
-            // Marching flow only on the actively-hovered chain — never at rest.
-            const flowing = !resting && connected && !a.ghost && !problem
+            // "Live" = part of the resting web or the hovered chain. A live arrow
+            // is dotted and marching; everything a hover pushes aside collapses to
+            // a thin, static, continuous line so only the focus keeps moving.
+            const live = resting || connected
+            const opacity = !live ? 0.1
+              : a.ghost ? 0.5
+              : isOrphaned ? 0.12
+              : resting ? 0.4
+              : 1
+            // Health is read from HOW the dashes march — smooth when balanced,
+            // stuttering (with a red flash behind it) when there's a shortfall.
+            const dashArray = !live ? '0' : a.ghost ? '1 7' : '6 4'
+            const flowClass = !live ? undefined
+              : a.ghost ? styles.arrowGhost
+              : problem ? styles.arrowBroken
+              : styles.arrowFlow
+            const baseWidth = !live ? 1 : (connected && highlight ? 2.5 : 1.5)
+            const strokeWidth = (problem && live) ? baseWidth + 0.75 : baseWidth
             // At scale the base color is the tier; tint the highlighted chain by alt.
             const stroke = (manyAlts && highlight !== null && connected && !a.ghost)
               ? (altColorOf(a.fromKey) ?? a.color)
               : a.color
             return (
               <g key={i} style={{ transition: 'opacity 0.15s' }} opacity={opacity}>
-                {problem && (
+                {problem && live && (
                   <path d={a.d} fill="none" stroke="#d65a5a" className={styles.issueBackdrop} />
                 )}
                 <path d={a.d} fill="none" stroke={stroke} strokeWidth={strokeWidth}
-                  strokeOpacity={a.ghost ? 0.6 : connected ? 0.85 : 0.5}
+                  strokeOpacity={!live ? 0.45 : a.ghost ? 0.6 : connected ? 0.85 : 0.5}
                   strokeDasharray={dashArray} color={stroke} markerEnd="url(#arrowhead)"
-                  className={flowing ? styles.arrowFlow : undefined} style={{ transition: 'stroke 0.25s, stroke-width 0.15s' }} />
+                  className={flowClass} style={{ transition: 'stroke 0.25s, stroke-width 0.15s' }} />
                 {(altHeld || (hoveredKey !== null && connected)) && !a.ghost && (
                   <>
                     <rect x={a.labelX - a.label.length * 3.2 - 6} y={a.labelY - 10}

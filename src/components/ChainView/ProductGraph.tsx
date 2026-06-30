@@ -180,8 +180,8 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
         )}
         <span className={styles.focusTitle}>Production overview · by product</span>
         {onShowPlanets && (
-          <button className={styles.dirBtn} onClick={onShowPlanets} title="Show every planet individually (detailed, heavier)">
-            Show every planet
+          <button className={styles.seeAllBtn} onClick={onShowPlanets} title="Drill into every planet individually (detailed, heavier)">
+            Per-planet detail <span className={styles.seeAllIcon}>▦</span>
           </button>
         )}
       </div>

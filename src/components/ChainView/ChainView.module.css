@@ -35,6 +35,27 @@
 }
 .dirBtn:hover { color: var(--text-primary); border-color: var(--border); }
 
+/* Pill button for stepping one level deeper in the drill-down ladder — matches
+   the "See everything" pill on the chain list. Pushed to the toolbar's right edge. */
+.seeAllBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+.seeAllBtn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.seeAllIcon { font-size: 14px; }
+
 .focusTitle {
   display: flex;
   align-items: center;
@@ -141,8 +162,9 @@
   z-index: 1;
 }
 
-/* Marching-dash flow is reserved for the chain you're actively hovering — only
-   then does .arrowFlow get applied, so the resting graph stays calm and static. */
+/* Every live connection marches: a smooth, steady flow reads as "balanced and
+   flowing". It runs at rest and on the hovered chain alike — motion is the
+   health language now, not a hover affordance. */
 .arrowFlow {
   animation: flowDash 1.6s linear infinite;
 }
@@ -152,12 +174,59 @@
   to   { stroke-dashoffset: 0; }
 }
 
-/* Issue arrows: a soft, static red glow behind the connector to mark a balance
-   problem. No animation — a steady tint, not a flashing pulse. */
+/* Suggestion / imported-from-outside arrows: a gentle stream of round DOTS
+   rather than dashes, so they read as "not a real production line from a
+   planet" at a glance. Slower and softer than the marching production flow. */
+.arrowGhost {
+  stroke-linecap: round;
+  animation: flowGhost 2.4s linear infinite;
+}
+
+@keyframes flowGhost {
+  from { stroke-dashoffset: 16; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* A shortfall breaks the rhythm: the line creeps forward, jerks back, and
+   stalls before lurching on — a production line that can't keep up. Net travel
+   per cycle is still 20 (one dash period ×2) so the loop stays seamless. */
+.arrowBroken {
+  animation: flowBroken 2.6s ease-in-out infinite;
+}
+
+@keyframes flowBroken {
+  0%   { stroke-dashoffset: 20; }
+  32%  { stroke-dashoffset: 11; }  /* creeps forward */
+  42%  { stroke-dashoffset: 15; }  /* jerks back */
+  60%  { stroke-dashoffset: 15; }  /* stalls */
+  100% { stroke-dashoffset: 0; }   /* lurches on */
+}
+
+/* Issue arrows ride over a red glow that flashes at the stall — the visual
+   "warning blip" of a stalled line, timed to the stutter above. */
 .issueBackdrop {
   stroke-linecap: round;
   stroke-width: 6px;
-  opacity: 0.22;
+  opacity: 0.2; /* steady fallback when the flash animation is disabled */
+  animation: issueFlash 2.6s ease-in-out infinite;
+}
+
+@keyframes issueFlash {
+  0%, 50% { opacity: 0.18; }
+  60%     { opacity: 0.6; }
+  72%     { opacity: 0.18; }
+  100%    { opacity: 0.18; }
+}
+
+/* Reduced-motion / battery save: stop every flow animation and fall back to
+   static lines. Health stays legible — problem arrows keep the (now steady) red
+   glow plus extra weight, ghosts keep their dotted pattern. Off-screen arrows
+   are already unmounted by viewport culling, so this only ever affects the
+   handful on screen. */
+@media (prefers-reduced-motion: reduce) {
+  .arrowFlow, .arrowGhost, .arrowBroken, .issueBackdrop {
+    animation: none;
+  }
 }
 
 /* ── Node ── */
