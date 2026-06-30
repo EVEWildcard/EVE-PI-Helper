@@ -86,7 +86,11 @@ export function useExtractorNotifications(characters: StoredCharacter[]) {
     })
   }, [expiredKeys])
 
-  const fireIfNeeded = useCallback(() => {
+  // `force` skips the hourly throttle — used when the user just enabled
+  // notifications or re-opened the app, so those moments alert promptly even if
+  // we notified recently. The background poll passes force=false so repeat
+  // alerts for the same expiries stay throttled to once an hour.
+  const fireIfNeeded = useCallback((force = false) => {
     if (!notificationsSupported) return
     if (Notification.permission !== 'granted') return
     if (localStorage.getItem(ENABLED_KEY) !== '1') return
@@ -99,8 +103,10 @@ export function useExtractorNotifications(characters: StoredCharacter[]) {
       return
     }
 
-    const last = Number(localStorage.getItem(LAST_NOTIFIED_KEY) || 0)
-    if (Date.now() - last < THROTTLE_MS) return
+    if (!force) {
+      const last = Number(localStorage.getItem(LAST_NOTIFIED_KEY) || 0)
+      if (Date.now() - last < THROTTLE_MS) return
+    }
 
     const title = count === 1 ? '1 extractor needs reset' : `${count} extractors need reset`
     try {
@@ -115,13 +121,17 @@ export function useExtractorNotifications(characters: StoredCharacter[]) {
     }
   }, [])
 
-  // Periodic scan + scan whenever the character data (or acks) change.
+  // Fire promptly when notifications are enabled / the app (re)opens — bypassing
+  // the hourly throttle so toggling on or re-opening alerts right away — then poll
+  // on the throttle. Deliberately NOT keyed on `characters`/`acked`: a new expiry
+  // is picked up by the poll within CHECK_INTERVAL_MS, and re-running this on every
+  // data refresh would re-fire the un-throttled alert and spam the user.
   useEffect(() => {
     if (!enabled) return
-    fireIfNeeded()
-    const id = setInterval(fireIfNeeded, CHECK_INTERVAL_MS)
+    fireIfNeeded(true)
+    const id = setInterval(() => fireIfNeeded(false), CHECK_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [enabled, characters, acked, fireIfNeeded])
+  }, [enabled, fireIfNeeded])
 
   /** Acknowledge all currently-expired extractors — clears the pill + notification until a new one expires. */
   const acknowledge = useCallback(() => {
