@@ -378,11 +378,14 @@ function SectionHeader({ kind, label, done, total, expanded, onToggle }: {
   kind: string; label: string; done: number; total: number; expanded: boolean; onToggle: () => void
 }) {
   const hasDone = done > 0
+  const complete = total > 0 && done === total
   return (
     <button type="button" className={styles.sectionTitle} onClick={onToggle} data-collapsible={hasDone ? '' : undefined}>
       <span className={styles.sectionDot} data-kind={kind} />
       <span className={styles.sectionLabel}>{label}</span>
-      {hasDone && <span className={styles.sectionCount}>{done === total ? 'all done' : `${done}/${total} done`}</span>}
+      <span className={styles.sectionCount} data-complete={complete ? '' : undefined}>
+        {complete ? 'all done' : `${done}/${total}`}
+      </span>
       {hasDone && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
     </button>
   )
