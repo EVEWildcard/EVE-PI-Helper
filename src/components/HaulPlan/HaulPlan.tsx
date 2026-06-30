@@ -485,6 +485,28 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     return () => clearTimeout(t)
   }, [focusNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Make ESI-verified resets sticky for the duration of a run. A verified reset
+  // (extractor running again) is otherwise only derived live from `now`, so when
+  // that fresh program later completes — expiry passes while you're still working
+  // through later alts — the verification flips off and the already-completed
+  // alt's green checkmark would vanish. Once we've seen it verified, record it as
+  // done so the completion can't un-stick mid-run.
+  useEffect(() => {
+    const verified = steps
+      .flatMap(s => s.resets)
+      .filter(r => isResetVerified(r.planet, now))
+      .map(r => resetKey(r.planet))
+    if (verified.length === 0) return
+    setChecked(prev => {
+      const next = new Set(prev)
+      let changed = false
+      for (const k of verified) if (!next.has(k)) { next.add(k); changed = true }
+      if (!changed) return prev
+      saveChecked(next)
+      return next
+    })
+  }, [steps, now])
+
   function toggle(key: string) {
     setChecked(prev => {
       const next = new Set(prev)
