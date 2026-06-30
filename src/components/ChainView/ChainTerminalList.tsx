@@ -1,13 +1,8 @@
 import React, { useMemo } from 'react'
 import type { StoredCharacter } from '../../types/api'
-import type { PITier } from '../../data/schematics'
 import { buildChainModel, type TerminalChain } from './chainModel'
+import { TIER_COLOR } from '../../data/tierColors'
 import styles from './ChainTerminalList.module.css'
-
-// Tier colors (mirrors ChainGraph; TIER_COLOR centralization is roadmap #6).
-const TIER_COLOR: Record<PITier, string> = {
-  P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
-}
 
 function formatIsk(isk: number): string {
   if (isk >= 1_000_000_000) return `${(isk / 1_000_000_000).toFixed(2)}B`

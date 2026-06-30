@@ -3,6 +3,7 @@ import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { PLANET_TYPES } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
+import { seedEmpireByPlanets, seedEmpireByCounts, clearTestData, MAX_PLANETS, MAX_ALTS, DEFAULT_DEV_PLANETS } from '../../dev/seedData'
 import styles from './SetupView.module.css'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -34,10 +35,7 @@ function fmtTrainingShort(finishDate: string): string {
 
 export { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
 import { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
-
-const TIER_COLOR: Record<string, string> = {
-  P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
-}
+import { TIER_COLOR } from '../../data/tierColors'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -535,6 +533,36 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
   const [planetSort, setPlanetSort] = useState<PlanetSort>(
     () => (localStorage.getItem('setup.planetSort') as PlanetSort) ?? 'name'
   )
+  // Dev-only generators (stress-test the production chain). The Scale slider
+  // grows ONE seeded empire by planet count (alts auto-added at randomized
+  // capacity); the Alts/Planets inputs pin both counts exactly.
+  const curPlanets = characters.reduce((s, c) => s + c.planets.length, 0)
+  const [seedPlanets, setSeedPlanets] = useState(() =>
+    Math.min(MAX_PLANETS, Math.max(1, curPlanets || DEFAULT_DEV_PLANETS))
+  )
+  const commitSeed = () => { seedEmpireByPlanets(seedPlanets); window.location.reload() }
+  const [altsInput, setAltsInput] = useState(() => String(characters.length || 8))
+  const [planetsInput, setPlanetsInput] = useState(() => String(curPlanets || DEFAULT_DEV_PLANETS))
+  const applyCounts = () => {
+    const a = Math.max(1, Math.min(MAX_ALTS, parseInt(altsInput, 10) || 1))
+    const p = Math.max(1, Math.min(MAX_PLANETS, parseInt(planetsInput, 10) || 1))
+    seedEmpireByCounts(a, p)
+    window.location.reload()
+  }
+
+  // Dev-only: on a fresh local store, auto-seed the default test empire (≈8 alts
+  // / 48 planets) with suggestions on, to match the canonical readability-test
+  // view. Fires once per browser (a flag survives "Clear" so empty stays empty);
+  // adjust scale anytime with the slider.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    if (characters.length > 0) return
+    if (localStorage.getItem('evepi.dev.seeded')) return
+    localStorage.setItem('evepi.dev.seeded', '1')
+    localStorage.setItem('chainView.suggestions', 'true')
+    seedEmpireByPlanets(DEFAULT_DEV_PLANETS)
+    window.location.reload()
+  }, [characters.length])
 
   async function handleImport() {
     setImporting(true)
@@ -557,7 +585,63 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
           <span className={styles.subtitle}>Add characters, assign planets, pick what each one produces</span>
         </div>
         <div className={styles.planetSortBar}>
-          <span className={styles.planetSortLabel}>Sort planets</span>
+          {import.meta.env.DEV && (
+            <>
+              <span
+                className={styles.planetSortLabel}
+                title="Dev: grow ONE seeded empire by planet count; alts auto-added at randomized capacity. 900 = ~150 toons, the graceful-degradation ceiling."
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                Scale
+                <input
+                  type="range"
+                  min={1}
+                  max={MAX_PLANETS}
+                  value={seedPlanets}
+                  onChange={(e) => setSeedPlanets(Number(e.target.value))}
+                  onPointerUp={commitSeed}
+                  onKeyUp={(e) => { if (e.key !== 'Tab') commitSeed() }}
+                  style={{ width: 150, verticalAlign: 'middle' }}
+                />
+                {/* Fixed width so the readout never reflows the slider while dragging. */}
+                <span style={{ display: 'inline-block', width: 56, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+                  {seedPlanets} pl
+                </span>
+              </span>
+              <span className={styles.planetSortLabel} style={{ marginLeft: 6 }}>Alts</span>
+              <input
+                type="number" min={1} max={MAX_ALTS} value={altsInput}
+                onChange={(e) => setAltsInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyCounts() }}
+                style={{ width: 48 }}
+                title="Number of alts"
+              />
+              <span className={styles.planetSortLabel}>Planets</span>
+              <input
+                type="number" min={1} max={MAX_PLANETS} value={planetsInput}
+                onChange={(e) => setPlanetsInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyCounts() }}
+                style={{ width: 56 }}
+                title="Total planets (capped at the alts' combined capacity)"
+              />
+              <button
+                className={styles.planetSortBtn}
+                onClick={applyCounts}
+                title="Dev only: generate exactly this many alts + planets (randomized realistic skills)"
+              >
+                Apply
+              </button>
+              <button
+                className={styles.planetSortBtn}
+                title="Dev only: wipe all characters"
+                onClick={() => { localStorage.setItem('evepi.dev.seeded', '1'); clearTestData(); window.location.reload() }}
+              >
+                Clear
+              </button>
+              <span className={styles.planetSortLabel} style={{ marginLeft: 8 }}>Sort planets</span>
+            </>
+          )}
+          {!import.meta.env.DEV && <span className={styles.planetSortLabel}>Sort planets</span>}
           {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
             <button
               key={opt}

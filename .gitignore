@@ -5,6 +5,3 @@ dist/
 *.local
 *.tsbuildinfo
 HANDOFF.md
-
-# Local-only dev tooling (test-data randomizer, etc.) — never committed
-src/dev/

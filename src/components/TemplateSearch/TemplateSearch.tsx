@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { ALL_PRODUCTS } from '../../data/schematics'
 import type { PIProduct } from '../../data/schematics'
+import { TIER_COLOR } from '../../data/tierColors'
 import styles from './TemplateSearch.module.css'
 
 const TEMPLATE_BASE = 'https://raw.githubusercontent.com/DalShooth/EVE_PI_Templates/8b141a8a321005bc18e1eb31645ce316f016fbd7/PlanetaryInteractionTemplates'
@@ -10,10 +11,6 @@ function templateUrl(role: 'factory' | 'miner', name: string) {
   const fixed = FILENAME_FIXES[name] ?? name
   const prefix = role === 'factory' ? 'Factory' : 'Miner - 00'
   return `${TEMPLATE_BASE}/${encodeURIComponent(`${prefix} - ${fixed}.json`)}`
-}
-
-const TIER_COLOR: Record<string, string> = {
-  P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
 }
 
 const FAB_HINT =

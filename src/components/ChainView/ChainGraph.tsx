@@ -3,6 +3,7 @@ import type { StoredCharacter } from '../../types/api'
 import { PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
 import type { PITier } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
+import { TIER_COLOR } from '../../data/tierColors'
 import { useChainSuggestions, useBalanceHints, type ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
 import { buildChainModel } from './chainModel'
@@ -18,13 +19,10 @@ import {
 import styles from './ChainView.module.css'
 
 // ── constants ─────────────────────────────────────────────────────────────────
-// Geometry constants + the layout math live in ./chainLayout. Color/label maps
-// stay here (TIER_COLOR is passed into the arrow builder as a param so the layout
-// module carries no color policy).
+// Geometry constants + the layout math live in ./chainLayout. TIER_COLOR is
+// shared via ../../data/tierColors and passed into the arrow builder as a param
+// so the layout module carries no color policy.
 
-const TIER_COLOR: Record<PITier, string> = {
-  P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
-}
 const TIER_COL: Partial<Record<string, number>> = { P1: 0, P2: 1, P3: 2, P4: 3 }
 const COL_LABELS = ['P1 — Extraction', 'P2 — Refining', 'P3 — Specialized', 'P4 — Advanced']
 

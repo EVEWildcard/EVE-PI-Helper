@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import type { StoredCharacter, Planet } from '../../types/api'
 import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME, ALL_SCHEMATICS, PRODUCT_BY_TYPE_ID } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
+import { TIER_COLOR } from '../../data/tierColors'
 import styles from './HaulPlan.module.css'
 
 // output name → its inputs with per-cycle quantities (all factory cycles are 1h,
@@ -70,9 +71,6 @@ function formatReadyAt(expiryTime: Date, now: number): string {
 
 const URGENCY_ORDER: Record<Urgency, number> = { expired: 0, critical: 1, warning: 2, ok: 3, idle: 4 }
 const TIER_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
-const TIER_COLOR: Record<string, string> = {
-  P0: '#708070', P1: '#4a90c8', P2: '#8060c0', P3: '#c06040', P4: '#c09020'
-}
 
 function isExtractorPlanet(planet: Planet): boolean {
   return (planet.outputTiers ?? []).some(t => t === 'P1')
