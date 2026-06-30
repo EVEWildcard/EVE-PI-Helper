@@ -37,6 +37,12 @@ export { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
 import { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
 
+// Dev empire seeder is shown when running locally (`npm run dev`, DEV=true) OR
+// when VITE_DEV_TOOLS=1 is set at build time — scope that var to Vercel's
+// Preview environment to expose the seeder on preview URLs without shipping it
+// to Production. When both are statically false the whole block tree-shakes out.
+const DEV_TOOLS = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1'
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatIsk(isk: number): string {
@@ -555,7 +561,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
   // view. Fires once per browser (a flag survives "Clear" so empty stays empty);
   // adjust scale anytime with the slider.
   useEffect(() => {
-    if (!import.meta.env.DEV) return
+    if (!DEV_TOOLS) return
     if (characters.length > 0) return
     if (localStorage.getItem('evepi.dev.seeded')) return
     localStorage.setItem('evepi.dev.seeded', '1')
@@ -585,7 +591,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
           <span className={styles.subtitle}>Add characters, assign planets, pick what each one produces</span>
         </div>
         <div className={styles.planetSortBar}>
-          {import.meta.env.DEV && (
+          {DEV_TOOLS && (
             <>
               <span
                 className={styles.planetSortLabel}
@@ -641,7 +647,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
               <span className={styles.planetSortLabel} style={{ marginLeft: 8 }}>Sort planets</span>
             </>
           )}
-          {!import.meta.env.DEV && <span className={styles.planetSortLabel}>Sort planets</span>}
+          {!DEV_TOOLS && <span className={styles.planetSortLabel}>Sort planets</span>}
           {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
             <button
               key={opt}
