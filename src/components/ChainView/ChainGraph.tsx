@@ -105,6 +105,15 @@ function buildGraph(characters: StoredCharacter[]): {
     }
   }
 
+  // consumerKey → set of supplier keys feeding it — so clustering is a Set lookup
+  // per (supplier, consumer) instead of a scan over every edge.
+  const suppliersByConsumer = new Map<string, Set<string>>()
+  for (const e of earlyEdges) {
+    let set = suppliersByConsumer.get(e.toKey)
+    if (!set) { set = new Set(); suppliersByConsumer.set(e.toKey, set) }
+    set.add(e.fromKey)
+  }
+
   // Top-down clustering: assign rows starting from the highest tier.
   // For each tier, group supplier nodes under their consumers (already row-ordered).
   function clusterUnderConsumers(supplierNodes: ChainNode[], consumerNodes: ChainNode[]) {
@@ -112,10 +121,12 @@ function buildGraph(characters: StoredCharacter[]): {
     const placed = new Set<string>()
     const ordered: ChainNode[] = []
     for (const consumer of consumersSorted) {
-      const feeders = supplierNodes
-        .filter(s => !placed.has(s.key) && earlyEdges.some(e => e.fromKey === s.key && e.toKey === consumer.key))
+      const feeders = suppliersByConsumer.get(consumer.key)
+      if (!feeders) continue
+      supplierNodes
+        .filter(s => !placed.has(s.key) && feeders.has(s.key))
         .sort((a, b) => a.characterName.localeCompare(b.characterName))
-      for (const n of feeders) { ordered.push(n); placed.add(n.key) }
+        .forEach(n => { ordered.push(n); placed.add(n.key) })
     }
     for (const n of supplierNodes) { if (!placed.has(n.key)) ordered.push(n) }
     ordered.forEach((n, i) => { n.row = i })
@@ -155,10 +166,11 @@ function clusterP1Nodes(nodes: ChainNode[], edges: ChainEdge[]): { nodes: ChainN
   const otherNodes = nodes.filter(n => n.column !== 0)
 
   // Map each P1 node to its first P2 consumer
+  const nodeByKey = new Map(nodes.map(n => [n.key, n]))
   const p1ToP2 = new Map<string, string>()
   for (const e of edges) {
-    const from = nodes.find(n => n.key === e.fromKey)
-    const to   = nodes.find(n => n.key === e.toKey)
+    const from = nodeByKey.get(e.fromKey)
+    const to   = nodeByKey.get(e.toKey)
     if (from?.column === 0 && to?.column === 1 && !p1ToP2.has(e.fromKey))
       p1ToP2.set(e.fromKey, e.toKey)
   }
@@ -443,6 +455,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const nodes = baseNodes
   const edges = baseEdges
 
+  // Key → node, built once per node set and reused by the lookups below (terminal
+  // coloring, per-arrow alt tint) so none of them scan the node array.
+  const nodeByKey = useMemo(() => new Map(nodes.map(n => [n.key, n])), [nodes])
+
   // Character color palette — distinct from TIER_COLOR values (P1=#4a90c8, P2=#8060c0, P3=#c06040, P4=#c09020)
   const CHAR_PALETTE = [
     '#3cc8a0', '#e05880', '#a0c840', '#d070e0', '#40c0e0', '#e09040', '#60d090', '#e06098'
@@ -494,12 +510,12 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     // terminalColorByNode kept for arrow coloring — maps nodeKey → character color of that node
     const terminalColorByNode = new Map<string, string>()
     for (const nodeKey of productive) {
-      const node = nodes.find(n => n.key === nodeKey)
+      const node = nodeByKey.get(nodeKey)
       if (node) terminalColorByNode.set(nodeKey, charColorByCharId.get(node.characterId) ?? TIER_COLOR[node.outputTier])
     }
 
     return { productiveNodes: productive, terminalColorByNode, nodeTerminal, terminalNameByKey }
-  }, [nodes, edges, charColorByCharId])
+  }, [nodes, edges, charColorByCharId, nodeByKey])
 
   // Primary consumed outputs: only edges where both nodes feed the same terminal
   const primaryConsumedByNode = useMemo(() => {
@@ -721,7 +737,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   // Alt color for a node key (node border tint + hovered-chain arrow tint at scale).
   const altColorOf = (key: string): string | undefined => {
-    const n = nodes.find(nn => nn.key === key)
+    const n = nodeByKey.get(key)
     return n ? (charColorByCharId.get(n.characterId) ?? TIER_COLOR[n.outputTier]) : undefined
   }
 

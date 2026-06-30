@@ -249,6 +249,9 @@ export function computeArrows(
   nodeSizes: Map<string, { w: number; h: number }>,
   { terminalColorByNode, tierColor }: ArrowColorOptions,
 ): { arrows: ArrowPath[]; svgSize: { w: number; h: number } } {
+  // Key → node, so the per-edge "is the target a ghost?" check is a lookup, not a
+  // scan over every node (O(edges) instead of O(edges × nodes)).
+  const nodeByKey = new Map(nodes.map(n => [n.key, n]))
   // Use CSS-space positions and sizes — avoids all scale-transform coordinate confusion
   const positions = new Map<string, { left: number; right: number; top: number; bottom: number; cx: number; cy: number }>()
   for (const node of nodes) {
@@ -294,7 +297,7 @@ export function computeArrows(
     if (!src || !dst) continue
     const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
     const label = [...new Set(destEdges.map(g => g.productName))].join(', ')
-    const isGhost = nodes.find(n => n.key === e.toKey)?.suggested === true
+    const isGhost = nodeByKey.get(e.toKey)?.suggested === true
     const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? tierColor[e.tier])
     newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
     maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
@@ -307,7 +310,7 @@ export function computeArrows(
     const dst = positions.get(e.toKey)
     if (!src || !dst) continue
     const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
-    const isGhost = nodes.find(n => n.key === e.toKey)?.suggested === true
+    const isGhost = nodeByKey.get(e.toKey)?.suggested === true
     const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? tierColor[e.tier])
     newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label: e.productName, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
     maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
