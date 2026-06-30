@@ -374,20 +374,28 @@ const VERB_PHRASE: Record<string, string> = {
 
 // Clickable section header. Completed rows in the section are hidden by default to
 // keep the list tidy as you work; clicking the header reveals them again.
-function SectionHeader({ kind, label, done, total, expanded, onToggle }: {
-  kind: string; label: string; done: number; total: number; expanded: boolean; onToggle: () => void
+function SectionHeader({ kind, label, done, total, expanded, onToggle, onCompleteAll }: {
+  kind: string; label: string; done: number; total: number
+  expanded: boolean; onToggle: () => void; onCompleteAll: () => void
 }) {
   const hasDone = done > 0
   const complete = total > 0 && done === total
   return (
-    <button type="button" className={styles.sectionTitle} onClick={onToggle} data-collapsible={hasDone ? '' : undefined}>
-      <span className={styles.sectionDot} data-kind={kind} />
-      <span className={styles.sectionLabel}>{label}</span>
-      <span className={styles.sectionCount} data-complete={complete ? '' : undefined}>
-        {complete ? 'all done' : `${done}/${total}`}
-      </span>
-      {hasDone && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
-    </button>
+    <div className={styles.sectionHeaderRow}>
+      <button type="button" className={styles.sectionTitle} onClick={onToggle} data-collapsible={hasDone ? '' : undefined}>
+        <span className={styles.sectionDot} data-kind={kind} />
+        <span className={styles.sectionLabel}>{label}</span>
+        <span className={styles.sectionCount} data-complete={complete ? '' : undefined}>
+          {complete ? 'all done' : `${done}/${total}`}
+        </span>
+        {hasDone && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
+      </button>
+      {!complete && total > 1 && (
+        <button type="button" className={styles.completeAllBtn} onClick={onCompleteAll} title={`Mark all ${total} as done`}>
+          Complete all
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -514,6 +522,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     setChecked(prev => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
+      saveChecked(next)
+      return next
+    })
+  }
+
+  // Tick every sub-item in a section in one click ("Complete all").
+  function checkAll(keys: string[]) {
+    setChecked(prev => {
+      const next = new Set(prev)
+      for (const k of keys) next.add(k)
       saveChecked(next)
       return next
     })
@@ -691,7 +709,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             const visible = expanded ? rows : rows.filter(x => !x.done)
             return (
               <div className={styles.section}>
-                <SectionHeader kind="reset" label="Reset & collect extractors" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('reset')} />
+                <SectionHeader kind="reset" label="Reset & collect extractors" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('reset')} onCompleteAll={() => checkAll(rows.map(x => x.key))} />
                 {visible.map(({ r, key, verified, done }) => (
                   <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''} ${pulsing && r.urgency === 'expired' && !done ? styles.taskPulse : ''}`}>
                     {verified ? (
@@ -726,7 +744,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             for (const s of step.stops) for (const i of s.inputs) { total++; if (isDone(deliverKey(s.planet, i.material))) doneCount++ }
             return (
               <div className={styles.section}>
-                <SectionHeader kind="deliver" label="Deliver inputs to your factories" done={doneCount} total={total} expanded={expanded} onToggle={() => toggleSection('deliver')} />
+                <SectionHeader kind="deliver" label="Deliver inputs to your factories" done={doneCount} total={total} expanded={expanded} onToggle={() => toggleSection('deliver')} onCompleteAll={() => checkAll(step.stops.flatMap(s => s.inputs.map(i => deliverKey(s.planet, i.material))))} />
                 {step.stops.map(stop => {
                   const inputs = expanded ? stop.inputs : stop.inputs.filter(i => !isDone(deliverKey(stop.planet, i.material)))
                   if (inputs.length === 0) return null
@@ -782,7 +800,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             const visible = expanded ? rows : rows.filter(x => !x.done)
             return (
               <div className={styles.section}>
-                <SectionHeader kind="input" label="Drop into shared PI container" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('deposit')} />
+                <SectionHeader kind="input" label="Drop into shared PI container" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('deposit')} onCompleteAll={() => checkAll(rows.map(x => x.key))} />
                 {visible.map(({ d, key, done }) => (
                   <label key={d.material} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
                     <input type="checkbox" className={styles.taskCheck} checked={done} onChange={() => toggle(key)} />
