@@ -10,7 +10,7 @@ import { buildChainModel } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
 import {
-  NODE_W,
+  NODE_W, NODE_H_EST,
   computeColCounts, computeTotalW, estimateTotalH, computeScale,
   computeMeasuredPositions, computeArrows,
   vEstColY as vEstColYPure, getNodeEstPos as getNodeEstPosPure,
@@ -393,12 +393,11 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     }
   }, [])
 
-  const [arrows, setArrows] = useState<ArrowPath[]>([])
-  const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
-  const [nodePos, setNodePos] = useState<Map<string, { x: number; y: number }>>(new Map())
-  const [nodeSizes, setNodeSizes] = useState<Map<string, { w: number; h: number }>>(new Map())
-  // center-x of each input chip in CSS canvas space, keyed `${nodeKey}:${inputName}`
-  const [inputChipCX, setInputChipCX] = useState<Map<string, number>>(new Map())
+  // Node sizes are measured once per CARD SHAPE, not per instance: a big empire
+  // has hundreds of planets but only a few dozen distinct card layouts (same
+  // outputs ⇒ same height). Measuring one of each makes every node's size known
+  // without mounting them all, which is what lets us cull off-screen cards.
+  const [sizeByShape, setSizeByShape] = useState<Map<string, { w: number; h: number }>>(new Map())
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   // Set while hovering a balance-warning chip → locates the responsible nodes.
   const [warnProduct, setWarnProduct] = useState<string | null>(null)
@@ -564,62 +563,115 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
   const vEstColY = (col: number) => vEstColYPure(col, colCounts, maxAssignedCol)
   const getNodeEstPos = (node: ChainNode) => getNodeEstPosPure(node, colCounts, maxAssignedCol)
+
+  // Card-shape signature per node: same outputs ⇒ same rendered size. Clusters are
+  // unique (their height depends on their members). Used to measure once per shape.
+  const shapeByKey = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const n of nodes) {
+      m.set(n.key, n.isCluster
+        ? `C|${n.key}`
+        : `${n.unassigned ? 'U' : ''}|${nodeTerminal.get(n.key) !== n.key ? 'F' : ''}|${n.outputNames.join('')}`)
+    }
+    return m
+  }, [nodes, nodeTerminal])
+
+  // Every node's size from the per-shape cache (estimate until its shape is seen).
+  const nodeSizes = useMemo(() => {
+    const m = new Map<string, { w: number; h: number }>()
+    for (const n of nodes) m.set(n.key, sizeByShape.get(shapeByKey.get(n.key)!) ?? { w: NODE_W, h: NODE_H_EST })
+    return m
+  }, [nodes, sizeByShape, shapeByKey])
+
+  // Band stacking only needs the tallest card per tier, so once every shape is
+  // measured the layout is exact even for nodes that were never mounted.
+  const nodePos = useMemo(
+    () => computeMeasuredPositions(nodes, colCounts, maxAssignedCol, nodeSizes).positions,
+    [nodes, colCounts, maxAssignedCol, nodeSizes]
+  )
   const getPos = (node: ChainNode) => nodePos.get(node.key) ?? getNodeEstPos(node)
+
+  // Arrows are pure over positions/sizes and view-independent, so they're memoized
+  // (NOT recomputed on pan/zoom — only the on-screen subset is re-filtered below).
+  const { arrows, svgSize } = useMemo(() => {
+    if (nodes.length === 0) return { arrows: [] as ArrowPath[], svgSize: { w: 0, h: 0 } }
+    const colorMap = manyAlts ? new Map<string, string>() : terminalColorByNode
+    return computeArrows(nodes, edges, nodePos, nodeSizes, { terminalColorByNode: colorMap, tierColor: TIER_COLOR })
+  }, [nodes, edges, nodePos, nodeSizes, terminalColorByNode, manyAlts])
 
   const totalW = computeTotalW(colCounts)
   const totalH = svgSize.h || estimateTotalH(colCounts, maxAssignedCol)
 
   const { isNarrow, scale } = computeScale(containerW, containerH, totalW, totalH)
 
-  // Applied view: the user's pan/zoom when set (wide screens only), else auto-fit
-  // (centered horizontally, top-aligned) — identical to the original behavior.
-  const fitView = { tx: Math.max(0, (containerW - totalW * scale) / 2), ty: 0, zoom: scale }
+  // Past this many nodes we both viewport-cull and stop opening at fit (which
+  // would be a microscopic, fan-pegging wall) — instead the default view holds a
+  // readable zoom so only a legible slice mounts; the user pans to explore.
+  const CULL_MIN = 120
+  const MIN_DEFAULT_ZOOM = 0.55
+  const bigGraph = nodes.length > CULL_MIN
+
+  // Applied view: the user's pan/zoom when set (wide screens only), else the
+  // default. Small graphs default to auto-fit (centered) exactly as before; big
+  // graphs default to a readable top-left slice so culling kicks in immediately.
+  const defaultZoom = bigGraph ? Math.max(scale, MIN_DEFAULT_ZOOM) : scale
+  const fitView = { tx: Math.max(0, (containerW - totalW * defaultZoom) / 2), ty: 0, zoom: defaultZoom }
   const v = (!isNarrow && view) ? view : fitView
   viewRef.current = v
   narrowRef.current = isNarrow
 
-  // Pass 1: measure actual node sizes → compute real positions
+  // Measure any not-yet-seen card shape from whatever is currently mounted, then
+  // cache it. Runs after each commit but only sets state while NEW shapes appear,
+  // so it converges in a pass or two and stays quiet during pan/zoom.
   useLayoutEffect(() => {
-    if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setArrows([]); return }
-
-    // getBoundingClientRect returns screen pixels (post-zoom); divide by the
-    // currently-applied zoom to recover CSS pixels (sizes are zoom-invariant).
-    const currentScale = viewRef.current.zoom
-
-    const sizes = new Map<string, { w: number; h: number }>()
+    const zoom = viewRef.current.zoom || 1
+    let next: Map<string, { w: number; h: number }> | null = null
     for (const node of nodes) {
+      const shp = shapeByKey.get(node.key)!
+      if (sizeByShape.has(shp) || next?.has(shp)) continue
       const el = nodeRefs.current.get(node.key)
       if (!el) continue
       const r = el.getBoundingClientRect()
-      sizes.set(node.key, { w: r.width / currentScale, h: r.height / currentScale })
+      if (r.width === 0) continue
+      if (!next) next = new Map(sizeByShape)
+      next.set(shp, { w: r.width / zoom, h: r.height / zoom })
     }
-    const { positions } = computeMeasuredPositions(nodes, colCounts, maxAssignedCol, sizes)
-    setNodePos(positions)
-    setNodeSizes(sizes)
+    if (next) setSizeByShape(next)
+    // Unmeasured-shape reps always mount (cull memo guarantees it), so new shapes
+    // only appear via these deps — never via pan. Re-runs until sizes converge.
+  }, [nodes, shapeByKey, sizeByShape])
 
-    // Measure input chip center-x values for per-input arrow anchoring
-    const canvasInner = canvasInnerRef.current
-    if (canvasInner) {
-      const canvasRect = canvasInner.getBoundingClientRect()
-      const chipCX = new Map<string, number>()
-      for (const [key, el] of inputChipRefs.current) {
-        const r = el.getBoundingClientRect()
-        chipCX.set(key, (r.left + r.width / 2 - canvasRect.left) / currentScale)
-      }
-      setInputChipCX(chipCX)
+  // Viewport culling: past CULL_MIN nodes, render only cards/arrows on screen
+  // (+ a ~1.5-card margin). One card per still-unmeasured shape is mounted too,
+  // wherever it sits, so sizes converge. Below the threshold, render everything.
+  const doCull = !isNarrow && containerW > 0 && bigGraph
+  const { renderNodes, visibleKeys } = useMemo(() => {
+    if (!doCull) return { renderNodes: nodes, visibleKeys: null as Set<string> | null }
+    const pad = NODE_W * 1.5
+    const x0 = -v.tx / v.zoom - pad, x1 = (containerW - v.tx) / v.zoom + pad
+    const y0 = -v.ty / v.zoom - pad, y1 = (containerH - v.ty) / v.zoom + pad
+    const vis = new Set<string>()
+    const seenShape = new Set<string>()
+    const out: ChainNode[] = []
+    for (const n of nodes) {
+      const p = nodePos.get(n.key), s = nodeSizes.get(n.key)
+      const onScreen = !p || !s ? true : (p.x <= x1 && p.x + s.w >= x0 && p.y <= y1 && p.y + s.h >= y0)
+      if (onScreen) vis.add(n.key)
+      const shp = shapeByKey.get(n.key)!
+      const needMeasure = !sizeByShape.has(shp) && !seenShape.has(shp)
+      if (needMeasure) seenShape.add(shp)
+      if (onScreen || needMeasure) out.push(n)
     }
-  }, [nodes, containerW])
+    return { renderNodes: out, visibleKeys: vis }
+  }, [doCull, nodes, nodePos, nodeSizes, sizeByShape, shapeByKey, v.tx, v.ty, v.zoom, containerW, containerH])
 
-  // Pass 2: draw arrows after positions are settled. At scale, pass an empty
-  // color map so arrows fall back to TIER colors; otherwise color by alt.
-  useLayoutEffect(() => {
-    if (nodes.length === 0 || nodePos.size === 0 || nodeSizes.size === 0) return
-    const colorMap = manyAlts ? new Map<string, string>() : terminalColorByNode
-    const { arrows: newArrows, svgSize: newSvgSize } =
-      computeArrows(nodes, edges, nodePos, nodeSizes, { terminalColorByNode: colorMap, tierColor: TIER_COLOR })
-    setSvgSize(newSvgSize)
-    setArrows(newArrows)
-  }, [nodes, edges, nodePos, nodeSizes, terminalColorByNode, inputChipCX, manyAlts])
+  // Both endpoints must be in the padded viewport: a visible hub (a P1 cluster
+  // feeding dozens of P2s) would otherwise drag its whole fan of arrows across an
+  // off-screen graph. You see the connections among what's on screen; panning
+  // reveals the rest, and the margin keeps edges from popping.
+  const renderArrows = (doCull && visibleKeys)
+    ? arrows.filter(a => visibleKeys.has(a.fromKey) && visibleKeys.has(a.toKey))
+    : arrows
 
   if (characters.length === 0) {
     return <div className={styles.empty}>Set up your characters first to see the production chain.</div>
@@ -847,7 +899,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
             </marker>
           </defs>
-          {arrows.map((a, i) => {
+          {renderArrows.map((a, i) => {
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
             const resting = highlight === null
             const connected = resting || (highlight.has(a.fromKey) && highlight.has(a.toKey))
@@ -896,7 +948,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
           })}
         </svg>
 
-        {nodes.map((node) => {
+        {renderNodes.map((node) => {
           const pos = getPos(node)
           return (
             <PlanetNode
