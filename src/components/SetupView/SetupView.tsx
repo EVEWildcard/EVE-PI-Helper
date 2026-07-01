@@ -37,11 +37,9 @@ export { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
 import { PLANET_LABEL, PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
 
-// Dev empire seeder is shown when running locally (`npm run dev`, DEV=true) OR
-// when VITE_DEV_TOOLS=1 is set at build time — scope that var to Vercel's
-// Preview environment to expose the seeder on preview URLs without shipping it
-// to Production. When both are statically false the whole block tree-shakes out.
-const DEV_TOOLS = import.meta.env.DEV || import.meta.env.VITE_DEV_TOOLS === '1'
+// Dev empire seeder gate. Always on locally (`npm run dev`); on deployed builds
+// it's revealed per-browser via `?dev=1` (see src/dev/devTools.ts).
+import { DEV_TOOLS } from '../../dev/devTools'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
