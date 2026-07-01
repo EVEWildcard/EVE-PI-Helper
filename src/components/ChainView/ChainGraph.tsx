@@ -341,6 +341,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const inputChipRefs = useRef<Map<string, HTMLSpanElement>>(new Map())
   const canvasInnerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Issue-row elements keyed by product name → so hovering a node can scroll its
+  // explaining Issue into view.
+  const hintRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [containerW, setContainerW] = useState(0)
   const [containerH, setContainerH] = useState(0)
 
@@ -588,6 +591,28 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     if (pinnedAltId != null && !characters.some(c => c.characterId === pinnedAltId)) setPinnedAltId(null)
   }, [characters, pinnedAltId])
 
+  // Hovering a node spotlights the Issue rows that EXPLAIN its odd-looking arrows —
+  // the products it makes or consumes that are out of balance. Connects the visual
+  // (a broken or fat arrow) to the "why", in words, on the right-hand panel.
+  const hoveredIssueProducts = useMemo(() => {
+    if (!hoveredKey) return new Set<string>()
+    const n = nodeByKey.get(hoveredKey)
+    if (!n) return new Set<string>()
+    const owns = (name: string) =>
+      n.outputNames.includes(name) || n.inputNames.includes(name) ||
+      (n.isCluster ? !!n.clusterMembers?.some(m => m.outputNames.includes(name)) : false)
+    return new Set(balanceHints.filter(h => owns(h.productName)).map(h => h.productName))
+  }, [hoveredKey, nodeByKey, balanceHints])
+
+  // Reveal + scroll the spotlighted Issue into view so the explanation is never
+  // hidden below the fold or inside the collapsed overproduction group.
+  useEffect(() => {
+    if (hoveredIssueProducts.size === 0) return
+    if (excess.some(h => hoveredIssueProducts.has(h.productName))) setShowExcess(true)
+    const first = [...hoveredIssueProducts][0]
+    hintRefs.current.get(first)?.scrollIntoView({ block: 'nearest' })
+  }, [hoveredIssueProducts, excess])
+
   // Layout math lives in ./chainLayout (pure). These thin closures bind the
   // current node set so call sites stay terse.
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
@@ -712,8 +737,12 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const activeCols = ([0, 1, 2, 3] as const).filter(i => nodes.some(n => n.column === i))
 
-  // Products with a balance problem → their arrows render dotted (vs solid healthy).
-  const problemProducts = new Set(balanceHints.map(h => h.productName))
+  // Only a SHORTFALL is a genuine fault — the line can't keep up, so its arrow
+  // marches broken with a red flash. Overproduction isn't a problem (the surplus
+  // just gets sold), so its arrow stays a healthy flow — only fatter + a touch
+  // faster, reading as "more than enough coming through" rather than "broken".
+  const shortfallProducts = new Set(bottlenecks.map(h => h.productName))
+  const surplusProducts = new Set(excess.map(h => h.productName))
 
   // Warning-chip hover → the nodes that make or consume that product.
   const warnKeys: Set<string> | null = warnProduct
@@ -807,7 +836,8 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     return (
       <div
         key={`${hint.productName}-${idx}`}
-        className={`${styles.balanceHint} ${isBottleneck ? styles.balanceHintSevere : ''} ${warnProduct === hint.productName ? styles.balanceHintActive : ''}`}
+        ref={el => { if (el) hintRefs.current.set(hint.productName, el); else hintRefs.current.delete(hint.productName) }}
+        className={`${styles.balanceHint} ${isBottleneck ? styles.balanceHintSevere : ''} ${warnProduct === hint.productName ? styles.balanceHintActive : ''} ${hoveredIssueProducts.has(hint.productName) ? styles.balanceHintSpotlight : ''}`}
         onMouseEnter={() => setWarnProduct(hint.productName)}
         onMouseLeave={() => setWarnProduct(null)}
         title={isBottleneck
@@ -958,7 +988,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             const isOrphaned = !productiveNodes.has(a.toKey) && !a.ghost
             const resting = highlight === null
             const connected = resting || (highlight.has(a.fromKey) && highlight.has(a.toKey))
-            const problem = !a.ghost && a.label.split(', ').some(n => problemProducts.has(n))
+            const labelNames = a.label.split(', ')
+            const shortfall = !a.ghost && labelNames.some(n => shortfallProducts.has(n))
+            const surplus   = !a.ghost && labelNames.some(n => surplusProducts.has(n))
             // "Live" = part of the resting web or the hovered chain. A live arrow
             // is dotted and marching; everything a hover pushes aside collapses to
             // a thin, static, continuous line so only the focus keeps moving.
@@ -973,17 +1005,21 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             const dashArray = !live ? '0' : a.ghost ? '1 7' : '6 4'
             const flowClass = !live ? undefined
               : a.ghost ? styles.arrowGhost
-              : problem ? styles.arrowBroken
+              : shortfall ? styles.arrowBroken
+              : surplus ? styles.arrowSurplus
               : styles.arrowFlow
             const baseWidth = !live ? 1 : (connected && highlight ? 2.5 : 1.5)
-            const strokeWidth = (problem && live) ? baseWidth + 0.75 : baseWidth
+            const strokeWidth = !live ? baseWidth
+              : shortfall ? baseWidth + 0.75
+              : surplus ? baseWidth + 1   // fatter = more flowing through than needed
+              : baseWidth
             // At scale the base color is the tier; tint the highlighted chain by alt.
             const stroke = (manyAlts && highlight !== null && connected && !a.ghost)
               ? (altColorOf(a.fromKey) ?? a.color)
               : a.color
             return (
               <g key={i} style={{ transition: 'opacity 0.15s' }} opacity={opacity}>
-                {problem && live && (
+                {shortfall && live && (
                   <path d={a.d} fill="none" stroke="#d65a5a" className={styles.issueBackdrop} />
                 )}
                 <path d={a.d} fill="none" stroke={stroke} strokeWidth={strokeWidth}
@@ -1068,7 +1104,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                   <span className={styles.legendTeachFlow} /> healthy flow
                 </div>
                 <div className={styles.legendTeachRow}>
-                  <span className={styles.legendTeachIssue} /> balance issue — see Issues
+                  <span className={styles.legendTeachIssue} /> shortfall — hover the card, see Issues
                 </div>
                 <p className={styles.legendTeachText}>
                   Cards are planets, arrows point from an input to the planet that uses it.
