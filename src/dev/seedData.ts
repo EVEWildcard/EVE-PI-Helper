@@ -25,8 +25,10 @@ import {
 } from '../data/schematics'
 import { type StoredCharacter, type Planet, type PISkillLevels } from '../types/api'
 import { MAX_ACCOUNTS, ALTS_PER_ACCOUNT, MAX_SUPPORTED_CHARACTERS } from '../capacity'
+import { STORE_KEY } from './devTools'
 
-const STORAGE_KEY = 'evepi.store'
+// Seeder writes to the dev sandbox key (evepi.store.dev) — see devTools.STORE_KEY.
+const STORAGE_KEY = STORE_KEY
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII']
 
 // EVE caps a character at 6 planets (Interplanetary Consolidation V: 1 + 5) and

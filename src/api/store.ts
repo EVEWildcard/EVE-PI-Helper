@@ -5,6 +5,7 @@
 
 import type { PISkillLevels, Planet, StoredCharacter } from '../types/api'
 import { MAX_PI_SKILLS } from '../types/api'
+import { STORE_KEY } from '../dev/devTools'
 
 interface StoreSchema {
   characters: StoredCharacter[]
@@ -12,7 +13,7 @@ interface StoreSchema {
   nextPlanetId: number
 }
 
-const STORAGE_KEY = 'evepi.store'
+const STORAGE_KEY = STORE_KEY
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
   'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX']
