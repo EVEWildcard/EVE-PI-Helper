@@ -4,6 +4,7 @@ import { ChainGraph } from './ChainGraph'
 import { ProductGraph } from './ProductGraph'
 import { ChainTerminalList } from './ChainTerminalList'
 import { buildChainModel } from './chainModel'
+import { filterToChain } from './chainFocus'
 import styles from './ChainView.module.css'
 
 // Container for the Production Chain tab. Default view is the ISK-ranked
@@ -25,24 +26,6 @@ function formatIsk(isk: number): string {
   if (isk >= 1_000_000) return `${(isk / 1_000_000).toFixed(1)}M`
   if (isk >= 1_000) return `${(isk / 1_000).toFixed(0)}K`
   return `${Math.round(isk)}`
-}
-
-/** Restrict a character roster to only the planets that feed `terminalTypeId`. */
-function filterToChain(
-  characters: StoredCharacter[],
-  model: ReturnType<typeof buildChainModel>,
-  terminalTypeId: number,
-): StoredCharacter[] {
-  const terminal = model.terminals.find(t => t.product.typeId === terminalTypeId)
-  if (!terminal) return characters
-  const chainNames = new Set<string>([terminal.product.name, ...terminal.upstreamProducts])
-  const keys = new Set<string>()
-  for (const f of model.flows.values()) {
-    if (chainNames.has(f.name)) for (const k of f.producerKeys) keys.add(k)
-  }
-  return characters
-    .map(c => ({ ...c, planets: c.planets.filter(p => keys.has(`${c.characterId}:${p.planetId}`)) }))
-    .filter(c => c.planets.length > 0)
 }
 
 export function ChainView({ characters, prices, onRefresh }: Props) {

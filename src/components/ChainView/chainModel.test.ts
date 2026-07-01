@@ -3,6 +3,7 @@ import type { Planet, StoredCharacter } from '../../types/api'
 import { DEFAULT_PI_SKILLS } from '../../types/api'
 import { PRODUCT_BY_NAME } from '../../data/schematics'
 import { buildChainModel, planetKey } from './chainModel'
+import { filterToChain } from './chainFocus'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
 // buildChainModel reads numeric `outputs` (typeIds) + `factoryCount`, so resolve
@@ -193,5 +194,42 @@ describe('buildChainModel — opportunities', () => {
     const model = buildChainModel([solo], prices({ Silicon: 100, 'Miniature Electronics': 5000 }))
     const t = model.terminals.find(t => t.product.name === 'Silicon')
     expect(t?.canExtend).toBeUndefined()
+  })
+})
+
+describe('filterToChain — single-chain focus', () => {
+  it('drops planets from other chains and trims a shared planet to the focused outputs', () => {
+    // 'Both' makes two disjoint terminals (Miniature Electronics + Coolant) from a
+    // shared factory; ExtA feeds only Mini, ExtB feeds only Coolant, CoolOnly makes
+    // only Coolant. Focusing Miniature Electronics must strip the Coolant chain out
+    // entirely AND trim 'Both' to just its Miniature Electronics output — otherwise
+    // the focused view would surface Coolant's inputs as phantom gaps.
+    const emp = char('Emp', [
+      planet('Both', ['Miniature Electronics', 'Coolant']),
+      planet('ExtA', ['Silicon', 'Chiral Structures']),
+      planet('ExtB', ['Water', 'Electrolytes']),
+      planet('CoolOnly', ['Coolant']),
+    ])
+    const model = buildChainModel([emp], prices({ 'Miniature Electronics': 1000, Coolant: 1 }))
+
+    const focused = filterToChain([emp], model, tid('Miniature Electronics'))
+    const kept = focused[0].planets.map(p => p.name).sort()
+    expect(kept).toEqual(['Both', 'ExtA'])
+
+    const both = focused[0].planets.find(p => p.name === 'Both')!
+    expect(both.outputs).toEqual([tid('Miniature Electronics')])
+  })
+
+  it('leaves a single-output planet untouched (same reference)', () => {
+    const emp = char('Emp', [
+      planet('E', ['Silicon', 'Chiral Structures']),
+      planet('F', ['Miniature Electronics']),
+    ])
+    const model = buildChainModel([emp], prices({ 'Miniature Electronics': 10 }))
+
+    const focused = filterToChain([emp], model, tid('Miniature Electronics'))
+    const f = focused[0].planets.find(p => p.name === 'F')!
+    const orig = emp.planets.find(p => p.name === 'F')!
+    expect(f).toBe(orig) // untrimmed planets pass through by reference
   })
 })
