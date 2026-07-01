@@ -23,3 +23,12 @@ function readFlag(): boolean {
 
 // Evaluated once at module load. Not persisted — presence of `?dev` gates it.
 export const DEV_TOOLS = readFlag()
+
+// Dev mode is a fully isolated sandbox: its character/planet data lives under a
+// SEPARATE localStorage key so seeded test empires never touch your real account.
+// Real site (no `?dev`)  → 'evepi.store'
+// Dev / `?dev`           → 'evepi.store.dev'
+// Flip `?dev` on/off to switch between the two instantly; neither clobbers the
+// other. (Local `npm run dev` is always the sandbox — a different origin from the
+// deployed site anyway, so its localStorage is already separate.)
+export const STORE_KEY = DEV_TOOLS ? 'evepi.store.dev' : 'evepi.store'
