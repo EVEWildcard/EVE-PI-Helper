@@ -42,7 +42,6 @@ export default function App() {
     updateCharacterSkills,
     setSkillOverrides,
     clearSkillOverrides,
-    addPlanet,
     renamePlanet,
     reloadCharacters,
   } = useCharacters()
@@ -244,9 +243,7 @@ export default function App() {
               onSkillChange={updateCharacterSkills}
               onSkillOverride={setSkillOverrides}
               onClearOverrides={clearSkillOverrides}
-              onAddPlanet={addPlanet}
               onRenamePlanet={renamePlanet}
-              onDone={() => setTab('chain')}
               prices={prices}
             />
           )}
