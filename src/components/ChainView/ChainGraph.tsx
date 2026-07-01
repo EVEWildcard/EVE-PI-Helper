@@ -906,7 +906,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                       className={styles.excessToggle}
                       onClick={() => setShowExcess(false)}
                     >
-                      ▾ Overproduced · {excess.length} (can be sold)
+                      ▾ Overproduced · {excess.length}
                     </button>
                   )}
                   {excess.map(renderHint)}
@@ -916,7 +916,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                   className={styles.excessToggle}
                   onClick={() => setShowExcess(true)}
                 >
-                  ▸ Overproduced · {excess.length} (can be sold)
+                  ▸ Overproduced · {excess.length}
                 </button>
               )
             )}
