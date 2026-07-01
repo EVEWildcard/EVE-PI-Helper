@@ -10,9 +10,9 @@ import { buildChainModel } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
 import {
-  NODE_W, NODE_H_EST,
+  NODE_W, NODE_H_EST, WRAP_ROW_GAP,
   computeColCounts, computeTotalW, estimateTotalH, computeScale,
-  computeMeasuredPositions, computeArrows,
+  computeMeasuredPositions, computeArrows, tierSubRows,
   vEstColY as vEstColYPure, getNodeEstPos as getNodeEstPosPure,
   type ClusterMember, type ChainNode, type ChainEdge, type ArrowPath,
 } from './chainLayout'
@@ -200,6 +200,7 @@ function clusterDuplicates(nodes: ChainNode[], edges: ChainEdge[]): { nodes: Cha
       for (const m of byChar.get(charId)!) {
         sortedMembers.push({
           planetName:    m.planetName,
+          planetType:    m.planetType,
           characterName: m.characterName,
           characterId:   m.characterId,
           outputNames:   m.outputNames,
@@ -640,8 +641,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   // Band stacking only needs the tallest card per tier, so once every shape is
   // measured the layout is exact even for nodes that were never mounted.
-  const nodePos = useMemo(
-    () => computeMeasuredPositions(nodes, colCounts, maxAssignedCol, nodeSizes).positions,
+  // bandY/bandH feed the faint tier-band washes behind each row.
+  const { positions: nodePos, bandY, bandH } = useMemo(
+    () => computeMeasuredPositions(nodes, colCounts, maxAssignedCol, nodeSizes),
     [nodes, colCounts, maxAssignedCol, nodeSizes]
   )
   const getPos = (node: ChainNode) => nodePos.get(node.key) ?? getNodeEstPos(node)
@@ -964,10 +966,25 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             ))}
           </div>
         )}
+        {/* Faint full-bleed tier bands — a color wash across the whole canvas per
+            P-row, so at any pan/zoom you know which tier band you're inside.
+            Screen-space (left:0 right:0 on the canvas), Y converted from canvas
+            coords, so they always reach both screen edges. */}
+        {!isNarrow && activeCols.map(i => {
+          const BAND_PAD = 16
+          const rows = tierSubRows(colCounts, i)
+          const rowH = bandH.get(i) ?? NODE_H_EST
+          const canvasY = (bandY.get(i) ?? vEstColY(i)) - BAND_PAD
+          const canvasH = rowH * rows + WRAP_ROW_GAP * (rows - 1) + BAND_PAD * 2
+          const c = TIER_COLOR[`P${i + 1}` as PITier]
+          return (
+            <div key={`band-${i}`} className={styles.tierBand}
+              style={{ top: canvasY * v.zoom + v.ty, height: canvasH * v.zoom, background: `color-mix(in srgb, ${c} 5%, transparent)` }} />
+          )
+        })}
         {/* Tier band labels — outside canvasInner, pinned to canvas left, Y converted to visual coords */}
         {activeCols.slice().reverse().map(i => {
-          const pos = nodePos.get(nodes.find(n => n.column === i)?.key ?? '')
-          const canvasY = pos?.y ?? vEstColY(i)
+          const canvasY = bandY.get(i) ?? vEstColY(i)
           const top = canvasY * v.zoom + v.ty
           return (
             <div key={i} className={styles.rowHeader} style={{ top }}>
@@ -1177,41 +1194,27 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
       )
     }
 
-    // Cluster node: duplicate producers of one product, sub-divided by character.
+    // Cluster node: duplicate producers of one product. Styled as a NORMAL planet
+    // card with extra header rows (one per planet: type dot, name, owner) and a
+    // stacked-cards edge peeking behind it — "several of this same card".
     if (node.isCluster && node.clusterMembers) {
-      // Group members by character in order of first appearance
-      const charOrder: number[] = []
-      const byChar = new Map<number, ClusterMember[]>()
-      for (const m of node.clusterMembers) {
-        if (!byChar.has(m.characterId)) { byChar.set(m.characterId, []); charOrder.push(m.characterId) }
-        byChar.get(m.characterId)!.push(m)
-      }
-      // In tier-mode the cluster colors by its product tier like every other node;
-      // otherwise it keeps the per-alt look (single alt → that alt's color,
-      // multiple → neutral border + a rainbow stripe of the contributing alts).
+      const members = node.clusterMembers
+      const charIds = Array.from(new Set(members.map(m => m.characterId)))
+      // Border like a normal card: the alt's color when one alt owns every
+      // member, neutral otherwise (each row still carries its alt's color).
       const clusterBorder = tierMode
         ? borderColor
-        : (charOrder.length === 1 ? (charColorByCharId.get(charOrder[0]) ?? 'var(--border)') : 'var(--border)')
-      const clusterStripe = tierMode
-        ? borderColor
-        : `linear-gradient(90deg, ${charOrder.map(id => charColorByCharId.get(id) ?? '#aaa').join(', ')})`
+        : (charIds.length === 1 ? (charColorByCharId.get(charIds[0]) ?? 'var(--border)') : 'var(--border)')
 
       // Cap the member list so a huge cluster (e.g. Precious Metals ×40) stays a
       // readable card; the rest collapse into a "+N more" line.
       const MEMBER_CAP = 12
-      let budget = MEMBER_CAP
-      const cappedGroups: { id: number; members: ClusterMember[] }[] = []
-      for (const id of charOrder) {
-        if (budget <= 0) break
-        const slice = byChar.get(id)!.slice(0, budget)
-        budget -= slice.length
-        cappedGroups.push({ id, members: slice })
-      }
-      const overflow = node.clusterMembers.length - (MEMBER_CAP - budget)
+      const shown = members.slice(0, MEMBER_CAP)
+      const overflow = members.length - shown.length
 
       return (
         <div ref={ref}
-          className={`${styles.node} ${styles.nodeCluster} ${hovered ? styles.nodeHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
+          className={`${styles.node} ${styles.nodeCluster} ${members.length > 2 ? styles.nodeClusterDeep : ''} ${hovered ? styles.nodeHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
           style={{ left: x, top: y, width: NODE_W,
             '--node-glow': clusterBorder,
             '--node-border': clusterBorder,
@@ -1219,30 +1222,30 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
           onMouseEnter={() => onHover(node.key)}
           onMouseLeave={() => onHover(null)}
         >
-          <div className={styles.nodeTierStripe} style={{ background: clusterStripe }} />
-          <div className={styles.nodeClusterHeader}>
-            <span className={styles.nodeClusterBadge}>{node.outputTier}</span>
-            <span className={styles.nodeClusterTitle}>{node.outputName || node.outputNames.join(', ')}</span>
-            <span className={styles.nodeClusterCount}>×{node.clusterMembers.length}</span>
-          </div>
-          {feedsLabel && <div className={styles.nodeChainLabel}>→ {feedsLabel}</div>}
-          <div className={styles.nodeClusterRows}>
-            {cappedGroups.map(({ id, members }) => {
-              const color = charColorByCharId.get(id) ?? '#aaa'
-              return (
-                <div key={id} className={styles.nodeClusterOwnerGroup} style={{ '--owner-color': color } as React.CSSProperties}>
-                  <span className={styles.nodeClusterOwnerName}>{members[0].characterName}</span>
-                  {members.map((m, i) => (
-                    <div key={i} className={styles.nodeClusterRow}>
-                      <span className={styles.nodeClusterChar}>{m.planetName}</span>
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
+          {/* Same tier stripe a normal card gets */}
+          <div className={styles.nodeTierStripe}
+            style={{ background: TIER_COLOR[node.outputTier] }} />
+          <div className={styles.nodeClusterMembers}>
+            {shown.map((m, i) => (
+              <div key={i} className={styles.nodeClusterMemberRow}>
+                <span className={styles.nodeDot} style={{ background: PLANET_COLOR[m.planetType] ?? '#404050' }} title={m.planetType} />
+                <span className={styles.nodePlanetName}>{m.planetName}</span>
+                <span className={styles.nodeChar} style={{ color: charColorByCharId.get(m.characterId) }}>{m.characterName}</span>
+              </div>
+            ))}
             {overflow > 0 && (
               <div className={styles.nodeClusterMore}>+{overflow} more planet{overflow !== 1 ? 's' : ''}</div>
             )}
+          </div>
+          {feedsLabel && <div className={styles.nodeChainLabel}>→ {feedsLabel}</div>}
+          <div className={styles.nodeOutputs}>
+            {node.outputNames.map((n, i) => (
+              <span key={n} className={styles.nodeOutputChip}
+                style={{ '--tier-color': TIER_COLOR[node.outputTiers[i]] } as React.CSSProperties}>
+                <span className={styles.nodeTierBadge}>{node.outputTiers[i]}</span>{n}
+              </span>
+            ))}
+            <span className={styles.nodeClusterCount}>×{members.length}</span>
           </div>
           {node.inputNames.length > 0 && (
             <div className={styles.nodeInputs}>

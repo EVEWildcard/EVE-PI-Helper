@@ -107,6 +107,16 @@
   color: var(--text-muted);
 }
 
+/* ── Tier bands: faint full-bleed color wash per P-row (screen-space) ── */
+
+.tierBand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
 /* ── Tier band labels (inside canvasInner, scale with content) ── */
 
 .rowHeader {
@@ -387,36 +397,57 @@
   border-style: dashed;
 }
 
-/* ── P1 cluster node ── */
+/* ── Cluster node (several planets making the same thing) ── */
+/* Looks exactly like a normal planet card, with one header row per planet and a
+   "stack of identical cards" edge drawn behind it via offset box-shadows
+   (fill + 1px border ring per back card, peeking up-right). */
 
 .nodeCluster {
   border-color: var(--node-border, var(--border));
+  box-shadow:
+    5px -5px 0 -1px var(--bg-card),
+    5px -5px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 60%, transparent),
+    0 2px 12px rgba(0,0,0,0.35);
 }
 
-.nodeClusterHeader {
-  padding: 6px 10px 4px;
+/* ×3 and up: a second back card, fainter, further out */
+.nodeClusterDeep {
+  box-shadow:
+    5px -5px 0 -1px var(--bg-card),
+    5px -5px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 60%, transparent),
+    10px -10px 0 -1px var(--bg-card),
+    10px -10px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 30%, transparent),
+    0 2px 12px rgba(0,0,0,0.35);
+}
+
+/* Hover keeps the stack visible under the glow ring */
+.nodeCluster.nodeHovered {
+  box-shadow:
+    0 0 0 2px var(--node-glow, var(--accent)),
+    5px -5px 0 -1px var(--bg-card),
+    5px -5px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 60%, transparent),
+    0 4px 24px rgba(0,0,0,0.5);
+}
+.nodeClusterDeep.nodeHovered {
+  box-shadow:
+    0 0 0 2px var(--node-glow, var(--accent)),
+    5px -5px 0 -1px var(--bg-card),
+    5px -5px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 60%, transparent),
+    10px -10px 0 -1px var(--bg-card),
+    10px -10px 0 0 color-mix(in srgb, var(--node-border, var(--border)) 30%, transparent),
+    0 4px 24px rgba(0,0,0,0.5);
+}
+
+.nodeClusterMembers {
+  padding: 4px 0 5px;
+}
+
+/* One planet per row, mirroring the normal card header: dot · name · owner */
+.nodeClusterMemberRow {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.nodeClusterBadge {
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--node-border);
-  opacity: 0.8;
-  flex-shrink: 0;
-}
-
-.nodeClusterTitle {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 3px 10px;
 }
 
 .nodeClusterCount {
@@ -425,47 +456,13 @@
   color: var(--node-border);
   opacity: 0.85;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .nodeClusterMore {
-  padding: 3px 10px 1px 18px;
+  padding: 2px 10px 1px 24px;
   font-size: 10px;
   font-style: italic;
-  color: var(--text-muted);
-}
-
-.nodeClusterRows {
-  padding: 2px 0 6px;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border);
-}
-
-.nodeClusterOwnerGroup {
-  padding: 4px 10px 4px 10px;
-  border-left: 2px solid var(--owner-color, var(--border));
-  margin: 2px 8px 0;
-  border-radius: 0 4px 4px 0;
-  background: color-mix(in srgb, var(--owner-color, transparent) 6%, transparent);
-}
-
-.nodeClusterOwnerName {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--owner-color, var(--text-muted));
-  margin-bottom: 3px;
-  letter-spacing: 0.02em;
-}
-
-.nodeClusterRow {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.nodeClusterChar {
-  font-size: 10px;
   color: var(--text-muted);
 }
 
@@ -891,9 +888,11 @@
 
 .legend {
   position: absolute;
-  bottom: 16px;       /* bottom-left — clears the templates FAB (bottom-right) */
-  left: 16px;
-  z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5) so P1/P2 don't bleed through the card */
+  bottom: 78px;       /* bottom-right, stacked above the templates FAB (~52px + gap) —
+                         keeps the left edge clear so the P1/P2 tier labels stay visible */
+  right: 16px;
+  z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5); below the
+                         warnings panel (15) and the templates panel (50) so those win on overlap */
   display: flex;
   flex-direction: column;
   gap: 5px;

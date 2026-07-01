@@ -31,6 +31,7 @@ export const WRAP_ROW_GAP = 28     // vertical gap between wrapped sub-rows with
 
 export interface ClusterMember {
   planetName: string
+  planetType: string
   characterName: string
   characterId: number
   outputNames: string[]
