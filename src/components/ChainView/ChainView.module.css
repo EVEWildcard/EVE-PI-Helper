@@ -888,9 +888,11 @@
 
 .legend {
   position: absolute;
-  bottom: 16px;       /* bottom-left — clears the templates FAB (bottom-right) */
-  left: 16px;
-  z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5) so P1/P2 don't bleed through the card */
+  bottom: 78px;       /* bottom-right, stacked above the templates FAB (~52px + gap) —
+                         keeps the left edge clear so the P1/P2 tier labels stay visible */
+  right: 16px;
+  z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5); below the
+                         warnings panel (15) and the templates panel (50) so those win on overlap */
   display: flex;
   flex-direction: column;
   gap: 5px;
