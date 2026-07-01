@@ -36,16 +36,6 @@ export function useCharacters() {
     )
   }, [])
 
-  const addPlanet = useCallback(async (characterId: number, type: string) => {
-    const planet = await window.api.addPlanet(characterId, type)
-    setCharacters((prev) =>
-      prev.map((c) =>
-        c.characterId === characterId ? { ...c, planets: [...c.planets, planet] } : c
-      )
-    )
-    return planet
-  }, [])
-
   const removePlanet = useCallback(async (characterId: number, planetId: number) => {
     await window.api.removePlanet(characterId, planetId)
     setCharacters((prev) =>
@@ -140,7 +130,6 @@ export function useCharacters() {
     updateCharacterSkills,
     setSkillOverrides,
     clearSkillOverrides,
-    addPlanet,
     removePlanet,
     renamePlanet,
     setPlanetOutputs,

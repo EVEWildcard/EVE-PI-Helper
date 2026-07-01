@@ -127,22 +127,6 @@ export const store = {
     return char
   },
 
-  addPlanet(characterId: number, type: string): Planet | null {
-    const state = load()
-    const char = state.characters.find(c => c.characterId === characterId)
-    if (!char) return null
-    const planet: Planet = {
-      planetId: state.nextPlanetId,
-      type,
-      name: `Planet ${toRoman(char.planets.length + 1)}`,
-      outputs: [],
-    }
-    char.planets.push(planet)
-    state.nextPlanetId += 1
-    persist(state)
-    return planet
-  },
-
   removePlanet(characterId: number, planetId: number): void {
     const state = load()
     const char = state.characters.find(c => c.characterId === characterId)
