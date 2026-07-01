@@ -52,6 +52,199 @@
 }
 .doneBtn:hover { opacity: 0.88; transform: translateY(-1px); }
 
+/* ── Workforce summary panel ── */
+
+.workforcePanel {
+  flex-shrink: 0;
+  padding: 12px 32px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wfHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.wfTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.wfMeta {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.wfHero {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+.wfHeroSub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.wfTiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.wfTile {
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.wfTileLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.wfTileVal {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.wfTileValSub {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.wfBar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.wfBarFill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}
+
+.wfChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wfChip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: filter 0.12s;
+  border: 1px solid transparent;
+}
+.wfChip:hover { filter: brightness(1.25); }
+.wfChipDanger {
+  background: rgba(224, 64, 64, 0.15);
+  color: var(--danger);
+  border-color: rgba(224, 64, 64, 0.3);
+}
+.wfChipWarn {
+  background: rgba(224, 160, 48, 0.15);
+  color: var(--warn);
+  border-color: rgba(224, 160, 48, 0.3);
+}
+.wfChipActive { filter: brightness(1.35); box-shadow: 0 0 0 1px currentColor inset; }
+
+.wfFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.wfFilterLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+.wfFilterBtn {
+  font-size: 12px;
+  padding: 4px 11px;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.wfFilterBtn:hover { color: var(--text-primary); border-color: var(--border-bright); }
+.wfFilterBtnActive {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+.wfCount {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* ── Compact rows (filtered view) ── */
+
+.compactList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 32px 32px;
+  display: flex;
+  flex-direction: column;
+}
+.compactEmpty {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 24px 4px;
+}
+.compactRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--bg-card);
+}
+.compactName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compactSkill { font-size: 11px; }
+.compactSkillMaxed { color: var(--ok); }
+.compactSkillWarn { color: var(--warn); }
+.compactSkillMuted { color: var(--text-muted); }
+.compactPlanets {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  width: 48px;
+  text-align: right;
+}
+.compactFlags {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 92px;
+  justify-content: flex-end;
+}
+.rowFlag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.rowFlagDanger { background: rgba(224, 64, 64, 0.15); color: var(--danger); }
+.rowFlagWarn { background: rgba(224, 160, 48, 0.15); color: var(--warn); }
+
 /* ── Cards row ── */
 
 .cards {

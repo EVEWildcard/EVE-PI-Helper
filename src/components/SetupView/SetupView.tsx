@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { PLANET_TYPES } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
@@ -133,29 +133,10 @@ function PlanetRow({ planet, onRename, hideOutputTier, prices }: PlanetRowProps)
     }
   })
 
-  const highestTier = outputs.reduce<string | null>((best, o) => {
-    const order: Record<string, number> = { P1: 1, P2: 2, P3: 3, P4: 4 }
-    return best == null || (order[o.tier] ?? 0) > (order[best] ?? 0) ? o.tier : best
-  }, null)
-  const isExtractor = highestTier === 'P1' || highestTier === null
-  const isIdleFactory = !isExtractor && (planet.factoryCount ?? 0) > 0 && outputs.length === 0
-
-  // Active = extractor with a future expiry, or factory with outputs configured
-  const isActive = isExtractor
-    ? (!!planet.expiryTime && new Date(planet.expiryTime).getTime() > Date.now())
-    : outputs.length > 0
-
-  // ISK/hr: sum over each output product. We split factoryCount evenly across outputs.
-  // units/hr per factory = (output.quantity / cycleTime) * 3600
-  const totalIskPerHr = outputs.reduce((sum, o) => {
-    const price = prices[o.typeId]
-    if (!price) return sum
-    const sch = SCHEMATIC_BY_OUTPUT.get(o.typeId)
-    if (!sch) return sum
-    const factoriesForThis = Math.max(1, Math.floor((planet.factoryCount ?? 1) / outputs.length))
-    const unitsPerHr = (sch.output.quantity / sch.cycleTime) * 3600 * factoriesForThis
-    return sum + unitsPerHr * price
-  }, 0)
+  const isExtractor = planetIsExtractor(planet)
+  const isIdleFactory = planetIsIdleFactory(planet)
+  const isActive = planetIsActive(planet)
+  const totalIskPerHr = planetIskPerHr(planet, prices)
 
   return (
     <div className={styles.planetEntry}>
@@ -515,6 +496,238 @@ function ImportModal({ onImport, onClose, importing, error }: ImportModalProps) 
   )
 }
 
+// ── Workforce stats ───────────────────────────────────────────────────────────
+// Everything here is derived from the in-memory `characters` array — no backend.
+// "Effective" skills fold in locally-planned overrides, matching what the cards
+// already display (planet count, PI badge).
+
+const PI_KEYS: (keyof PISkillLevels)[] = [
+  'commandCenterUpgrades', 'interplanetaryConsolidation', 'remoteSensing', 'planetology', 'advancedPlanetology',
+]
+
+function effectiveSkills(char: StoredCharacter): PISkillLevels {
+  const ov = char.skillOverrides ?? {}
+  const out = { ...char.piSkills }
+  for (const k of PI_KEYS) out[k] = Math.max(char.piSkills[k], ov[k] ?? 0)
+  return out
+}
+
+function planetHighestTier(planet: Planet): string | null {
+  const tiers = (planet.outputs ?? []).map((tid, i) =>
+    (PRODUCT_BY_TYPE_ID.get(tid)?.tier ?? planet.outputTiers?.[i] ?? 'P1') as string)
+  return tiers.reduce<string | null>((best, t) =>
+    best == null || (TIER_SORT_ORDER[t] ?? 0) > (TIER_SORT_ORDER[best] ?? 0) ? t : best, null)
+}
+
+// Shared classification helpers — the cards (PlanetRow) and the workforce summary
+// both call these so their counts and ISK/hr always agree.
+function planetIsExtractor(planet: Planet): boolean {
+  const top = planetHighestTier(planet)
+  return top === 'P1' || top === null
+}
+function planetIsActive(planet: Planet): boolean {
+  if (planetIsExtractor(planet)) return !!planet.expiryTime && new Date(planet.expiryTime).getTime() > Date.now()
+  return (planet.outputs?.length ?? 0) > 0
+}
+function planetIsExpiredExtractor(planet: Planet): boolean {
+  return planetIsExtractor(planet) && !!planet.expiryTime && new Date(planet.expiryTime).getTime() <= Date.now()
+}
+function planetIsIdleFactory(planet: Planet): boolean {
+  return !planetIsExtractor(planet) && (planet.factoryCount ?? 0) > 0 && (planet.outputs?.length ?? 0) === 0
+}
+
+// units/hr per factory = (output.quantity / cycleTime) * 3600; factoryCount split evenly across outputs.
+function planetIskPerHr(planet: Planet, prices: Record<number, number>): number {
+  const outs = planet.outputs ?? []
+  if (outs.length === 0) return 0
+  return outs.reduce((sum, tid) => {
+    const price = prices[tid]
+    if (!price) return sum
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
+    if (!sch) return sum
+    const factoriesForThis = Math.max(1, Math.floor((planet.factoryCount ?? 1) / outs.length))
+    const unitsPerHr = (sch.output.quantity / sch.cycleTime) * 3600 * factoriesForThis
+    return sum + unitsPerHr * price
+  }, 0)
+}
+
+interface CharStat {
+  char: StoredCharacter
+  eff: PISkillLevels
+  piEnabled: boolean
+  maxPlanets: number
+  planetsUsed: number
+  freeSlots: number
+  skillMaxed: boolean   // IC 5 + CCU 5 — the two skills that gate a running empire
+  full6: boolean        // IC maxed (6 slots) AND all 6 planets deployed — fully built
+  extractors: number
+  expiredCount: number
+  idleCount: number
+  iskPerHr: number      // running output only (active planets)
+  noPlanets: boolean
+}
+
+function computeCharStat(char: StoredCharacter, prices: Record<number, number>): CharStat {
+  const eff = effectiveSkills(char)
+  const piEnabled = eff.commandCenterUpgrades >= 1
+  const maxPlanets = 1 + eff.interplanetaryConsolidation
+  const planetsUsed = char.planets.length
+  return {
+    char, eff, piEnabled, maxPlanets, planetsUsed,
+    freeSlots: piEnabled ? Math.max(0, maxPlanets - planetsUsed) : 0,
+    skillMaxed: piEnabled && eff.interplanetaryConsolidation === 5 && eff.commandCenterUpgrades === 5,
+    full6: maxPlanets >= 6 && planetsUsed >= 6,
+    extractors: char.planets.filter(planetIsExtractor).length,
+    expiredCount: char.planets.filter(planetIsExpiredExtractor).length,
+    idleCount: char.planets.filter(planetIsIdleFactory).length,
+    iskPerHr: char.planets.reduce((sum, p) => sum + (planetIsActive(p) ? planetIskPerHr(p, prices) : 0), 0),
+    noPlanets: piEnabled && planetsUsed === 0,
+  }
+}
+
+type WorkforceFilter = 'all' | 'notMaxed' | 'freeSlots' | 'noPlanets' | 'expired' | 'idle'
+
+const WF_FILTERS: { key: WorkforceFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'notMaxed', label: 'Not maxed' },
+  { key: 'freeSlots', label: 'Free slots' },
+  { key: 'noPlanets', label: 'No planets' },
+  { key: 'expired', label: 'Expired' },
+  { key: 'idle', label: 'Idle' },
+]
+
+function statMatchesFilter(s: CharStat, f: WorkforceFilter): boolean {
+  switch (f) {
+    case 'all': return true
+    case 'notMaxed': return s.piEnabled && !s.skillMaxed
+    case 'freeSlots': return s.freeSlots > 0
+    case 'noPlanets': return s.noPlanets
+    case 'expired': return s.expiredCount > 0
+    case 'idle': return s.idleCount > 0
+  }
+}
+
+// Higher = needs more attention; used to float the worst toons to the top when filtered.
+function statSeverity(s: CharStat): number {
+  return (s.noPlanets ? 100 : 0) + s.expiredCount * 10 + s.idleCount * 5 + s.freeSlots
+}
+
+// ── Compact row (shown when a filter narrows the list) ─────────────────────────
+
+function CompactRow({ stat }: { stat: CharStat }) {
+  const { char, eff, piEnabled, skillMaxed, planetsUsed, maxPlanets } = stat
+  const flags: React.ReactNode[] = []
+  if (stat.noPlanets) flags.push(<span key="np" className={`${styles.rowFlag} ${styles.rowFlagDanger}`}>no planets</span>)
+  if (stat.expiredCount > 0) flags.push(<span key="ex" className={`${styles.rowFlag} ${styles.rowFlagDanger}`}>{stat.expiredCount} expired</span>)
+  if (stat.idleCount > 0) flags.push(<span key="id" className={`${styles.rowFlag} ${styles.rowFlagWarn}`}>{stat.idleCount} idle</span>)
+  if (stat.freeSlots > 0 && !stat.noPlanets) flags.push(<span key="fs" className={`${styles.rowFlag} ${styles.rowFlagWarn}`}>{stat.freeSlots} free</span>)
+
+  const skill = !piEnabled
+    ? <span className={styles.compactSkillMuted}>not PI enabled</span>
+    : skillMaxed
+      ? <span className={styles.compactSkillMaxed}>all skills maxed</span>
+      : <span className={styles.compactSkillWarn}>IC {eff.interplanetaryConsolidation} · CCU {eff.commandCenterUpgrades}</span>
+
+  return (
+    <div className={styles.compactRow}>
+      <span className={styles.compactName}>{char.characterName}</span>
+      <span className={styles.compactSkill}>{skill}</span>
+      <span className={styles.compactPlanets} title="Planets used / max">{planetsUsed}/{piEnabled ? maxPlanets : '—'}</span>
+      <span className={styles.compactFlags}>{flags}</span>
+    </div>
+  )
+}
+
+// ── Workforce summary panel ────────────────────────────────────────────────────
+
+function WorkforceBar({ stats, filter, setFilter }: {
+  stats: CharStat[]
+  filter: WorkforceFilter
+  setFilter: (f: WorkforceFilter) => void
+}) {
+  const agg = useMemo(() => {
+    const pi = stats.filter(s => s.piEnabled)
+    const piToons = pi.length
+    const expired = stats.reduce((a, s) => a + s.expiredCount, 0)
+    const extractors = stats.reduce((a, s) => a + s.extractors, 0)
+    return {
+      toons: stats.length,
+      piToons,
+      accounts: Math.max(1, Math.ceil(stats.length / ALTS_PER_ACCOUNT)),
+      totalPlanets: stats.reduce((a, s) => a + s.planetsUsed, 0),
+      empireIsk: stats.reduce((a, s) => a + s.iskPerHr, 0),
+      skillMaxedPct: piToons ? Math.round(100 * pi.filter(s => s.skillMaxed).length / piToons) : 0,
+      full6Count: pi.filter(s => s.full6).length,
+      extractors,
+      expired,
+      expiredPct: extractors ? Math.round(100 * expired / extractors) : 0,
+      noPlanets: stats.filter(s => s.noPlanets).length,
+      idle: stats.reduce((a, s) => a + s.idleCount, 0),
+      freeSlots: stats.reduce((a, s) => a + s.freeSlots, 0),
+    }
+  }, [stats])
+
+  // Clicking a weakness chip jumps you to the matching filter (toggle off if re-clicked).
+  const jump = (f: WorkforceFilter) => setFilter(filter === f ? 'all' : f)
+
+  return (
+    <div className={styles.workforcePanel}>
+      <div className={styles.wfHeader}>
+        <span className={styles.wfTitle}>Your workforce</span>
+        <span className={styles.wfMeta}>
+          {agg.accounts} account{agg.accounts === 1 ? '' : 's'} · {agg.piToons} PI toon{agg.piToons === 1 ? '' : 's'} · {agg.totalPlanets} planets
+        </span>
+        <span className={styles.wfHero} title="Estimated running output — active planets only, at market-average prices">
+          ≈ {formatIsk(agg.empireIsk)}<span className={styles.wfHeroSub}>/hr</span>
+        </span>
+      </div>
+
+      <div className={styles.wfTiles}>
+        <div className={styles.wfTile}>
+          <div className={styles.wfTileLabel}>Skills maxed</div>
+          <div className={styles.wfTileVal}>{agg.skillMaxedPct}<span className={styles.wfTileValSub}>%</span></div>
+          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.skillMaxedPct}%`, background: 'var(--ok)' }} /></div>
+        </div>
+        <div className={styles.wfTile}>
+          <div className={styles.wfTileLabel}>Toons at 6/6</div>
+          <div className={styles.wfTileVal}>{agg.full6Count}<span className={styles.wfTileValSub}>/{agg.piToons}</span></div>
+          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.piToons ? Math.round(100 * agg.full6Count / agg.piToons) : 0}%`, background: 'var(--accent)' }} /></div>
+        </div>
+        <div className={styles.wfTile}>
+          <div className={styles.wfTileLabel}>Extractors expired</div>
+          <div className={styles.wfTileVal}>{agg.expired}<span className={styles.wfTileValSub}>/{agg.extractors}</span></div>
+          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.expiredPct}%`, background: 'var(--danger)' }} /></div>
+        </div>
+      </div>
+
+      {(agg.noPlanets > 0 || agg.expired > 0 || agg.idle > 0 || agg.freeSlots > 0) && (
+        <div className={styles.wfChips}>
+          {agg.noPlanets > 0 && <button className={`${styles.wfChip} ${styles.wfChipDanger} ${filter === 'noPlanets' ? styles.wfChipActive : ''}`} onClick={() => jump('noPlanets')}>{agg.noPlanets} toon{agg.noPlanets === 1 ? '' : 's'} · no planets</button>}
+          {agg.expired > 0 && <button className={`${styles.wfChip} ${styles.wfChipDanger} ${filter === 'expired' ? styles.wfChipActive : ''}`} onClick={() => jump('expired')}>{agg.expired} expired extractor{agg.expired === 1 ? '' : 's'}</button>}
+          {agg.idle > 0 && <button className={`${styles.wfChip} ${styles.wfChipWarn} ${filter === 'idle' ? styles.wfChipActive : ''}`} onClick={() => jump('idle')}>{agg.idle} idle factor{agg.idle === 1 ? 'y' : 'ies'}</button>}
+          {agg.freeSlots > 0 && <button className={`${styles.wfChip} ${styles.wfChipWarn} ${filter === 'freeSlots' ? styles.wfChipActive : ''}`} onClick={() => jump('freeSlots')}>{agg.freeSlots} free planet slot{agg.freeSlots === 1 ? '' : 's'}</button>}
+        </div>
+      )}
+
+      <div className={styles.wfFilterBar}>
+        <span className={styles.wfFilterLabel}>Filter</span>
+        {WF_FILTERS.map(({ key, label }) => {
+          const count = stats.filter(s => statMatchesFilter(s, key)).length
+          return (
+            <button
+              key={key}
+              className={`${styles.wfFilterBtn} ${filter === key ? styles.wfFilterBtnActive : ''}`}
+              onClick={() => setFilter(key)}
+            >
+              {label} <span className={styles.wfCount}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── SetupView ─────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -537,6 +750,14 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
   const [planetSort, setPlanetSort] = useState<PlanetSort>(
     () => (localStorage.getItem('setup.planetSort') as PlanetSort) ?? 'name'
   )
+  const [filter, setFilter] = useState<WorkforceFilter>('all')
+
+  const stats = useMemo(() => characters.map(c => computeCharStat(c, prices)), [characters, prices])
+  const visibleStats = useMemo(() => {
+    if (filter === 'all') return [...stats].sort((a, b) => b.planetsUsed - a.planetsUsed)
+    return stats.filter(s => statMatchesFilter(s, filter))
+      .sort((a, b) => statSeverity(b) - statSeverity(a) || b.planetsUsed - a.planetsUsed)
+  }, [stats, filter])
   // Dev-only generator (stress-test the production chain). The Scale slider is
   // ACCOUNT-based: one seeded empire of N accounts (each running all 3 alts);
   // the more accounts, the likelier each alt is maxed (all maxed at the ceiling).
@@ -627,8 +848,21 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
         </div>
       </div>
 
+      {characters.length > 0 && (
+        <WorkforceBar stats={stats} filter={filter} setFilter={setFilter} />
+      )}
+
+      {filter !== 'all' ? (
+        <div className={styles.compactList}>
+          {visibleStats.length === 0 ? (
+            <div className={styles.compactEmpty}>No toons match this filter — nice.</div>
+          ) : (
+            visibleStats.map((s) => <CompactRow key={s.char.characterId} stat={s} />)
+          )}
+        </div>
+      ) : (
       <div className={styles.cards}>
-        {[...characters].sort((a, b) => b.planets.length - a.planets.length).map((char) => (
+        {visibleStats.map(({ char }) => (
           <CharCard
             key={char.characterId}
             char={char}
@@ -667,6 +901,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
