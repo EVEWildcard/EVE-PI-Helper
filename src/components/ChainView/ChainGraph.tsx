@@ -4,7 +4,7 @@ import { PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '.
 import type { PITier } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
-import { useChainSuggestions, useBalanceHints, type ChainSuggestion, type BalanceHint } from '../../hooks/useChainSuggestions'
+import { useChainSuggestions, useBalanceHints, buildShortfallSuggestion, type ChainSuggestion, type BalanceHint } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
 import { buildChainModel } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
@@ -842,8 +842,12 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         className={`${styles.balanceHint} ${isBottleneck ? styles.balanceHintSevere : ''} ${warnProduct === hint.productName ? styles.balanceHintActive : ''} ${hoveredIssueProducts.has(hint.productName) ? styles.balanceHintSpotlight : ''}`}
         onMouseEnter={() => setWarnProduct(hint.productName)}
         onMouseLeave={() => setWarnProduct(null)}
+        onClick={isBottleneck ? () => {
+          const fix = buildShortfallSuggestion(hint, characters, prices, assumeMaxSkills, systemPlanets)
+          if (fix) setSelectedSuggestion(fix)
+        } : undefined}
         title={isBottleneck
-          ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. This is costing you output. Hover to locate it; consider adding another extractor.`
+          ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. This is costing you output. Click for a fix plan with the PI template to copy.`
           : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. The surplus can be sold. Hover to locate it; consider repurposing an extractor.`
         }
       >
