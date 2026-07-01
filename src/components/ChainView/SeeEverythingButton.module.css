@@ -1,0 +1,20 @@
+/* The shared "See everything" pill. margin-left: auto pins it to the right edge
+   of whatever flex toolbar hosts it (chain list + single-chain graph). */
+.seeAllBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+.seeAllBtn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.seeAllIcon { font-size: 14px; }

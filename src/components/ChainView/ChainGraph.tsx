@@ -16,6 +16,7 @@ import {
   vEstColY as vEstColYPure, getNodeEstPos as getNodeEstPosPure,
   type ClusterMember, type ChainNode, type ChainEdge, type ArrowPath,
 } from './chainLayout'
+import { SeeEverythingButton } from './SeeEverythingButton'
 import styles from './ChainView.module.css'
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -811,11 +812,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             Fit · {Math.round(v.zoom * 100)}%
           </button>
         )}
-        {onSeeEverything && (
-          <button className={styles.seeAllBtn} onClick={onSeeEverything} title="Render the full combined production graph">
-            See everything <span className={styles.seeAllIcon}>⊞</span>
-          </button>
-        )}
+        {onSeeEverything && <SeeEverythingButton onClick={onSeeEverything} />}
       </div>
 
       <div className={`${styles.canvas} ${isNarrow ? styles.canvasScroll : ''}`} ref={canvasRef}>

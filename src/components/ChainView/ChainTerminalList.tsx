@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import type { StoredCharacter } from '../../types/api'
 import { buildChainModel, type TerminalChain } from './chainModel'
 import { TIER_COLOR } from '../../data/tierColors'
+import { SeeEverythingButton } from './SeeEverythingButton'
 import styles from './ChainTerminalList.module.css'
 
 function formatIsk(isk: number): string {
@@ -45,9 +46,7 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
             {brokenCount > 0 && <span className={styles.subtitleWarn}> · {brokenCount} broken</span>}
           </span>
         </div>
-        <button className={styles.seeAllBtn} onClick={onSeeEverything} title="Render the full combined production graph">
-          See everything <span className={styles.seeAllIcon}>⊞</span>
-        </button>
+        <SeeEverythingButton onClick={onSeeEverything} />
       </div>
 
       <div className={styles.list}>

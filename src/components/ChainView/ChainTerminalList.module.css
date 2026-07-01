@@ -42,24 +42,6 @@
 }
 .subtitleWarn { color: #d05050; font-weight: 600; }
 
-.seeAllBtn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color 0.1s, border-color 0.1s, background 0.1s;
-}
-.seeAllBtn:hover { color: var(--text-primary); border-color: var(--text-muted); }
-.seeAllIcon { font-size: 14px; }
-
 /* ── List ── */
 
 .list {
