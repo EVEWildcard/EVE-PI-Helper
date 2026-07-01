@@ -402,8 +402,28 @@
 }
 
 .nodeClusterTitle {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeClusterCount {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--node-border);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.nodeClusterMore {
+  padding: 3px 10px 1px 18px;
+  font-size: 10px;
+  font-style: italic;
   color: var(--text-muted);
 }
 
@@ -435,12 +455,6 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-}
-
-.nodeClusterOutput {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 .nodeClusterChar {
@@ -568,6 +582,45 @@
 .balanceHintRatio {
   color: var(--text-muted);
   margin-left: 3px;
+}
+
+/* Shortfall — an actual loss of output, so it reads red/urgent rather than amber. */
+.balanceHintSevere {
+  background: rgba(214, 90, 90, 0.1);
+  border-color: rgba(214, 90, 90, 0.4);
+}
+.balanceHintSevere:hover, .balanceHintSevere.balanceHintActive {
+  background: rgba(214, 90, 90, 0.2);
+  border-color: rgba(214, 90, 90, 0.7);
+}
+.balanceHintSevere .balanceHintText strong {
+  color: #e07a7a;
+}
+
+/* Collapse toggle for the (lower-priority) overproduction group. */
+.excessToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.excessToggle:hover {
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  border-color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 /* ── Suggestions column (second right-side column, green-tinted) ── */
@@ -812,6 +865,7 @@
   position: absolute;
   bottom: 16px;       /* bottom-left — clears the templates FAB (bottom-right) */
   left: 16px;
+  z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5) so P1/P2 don't bleed through the card */
   display: flex;
   flex-direction: column;
   gap: 5px;

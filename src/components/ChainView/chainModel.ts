@@ -71,6 +71,7 @@ export interface TerminalChain {
   bottleneck?: { name: string; ratio: number }  // scarcest produced input limiting throughput
   upstreamProducts: string[]   // produced product names feeding this terminal (excl. itself)
   producerKeys: string[]       // planets producing the terminal product
+  chainPlanetCount: number     // distinct planets across the whole chain (terminal + all upstream)
   // "Just sell the inputs instead of producing this" — when the direct inputs are
   // worth more per hour at market than the finished product. deltaIskHr > 0.
   sellInstead?: { deltaIskHr: number; toSell: string[] }
@@ -321,6 +322,11 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       bottleneck,
       upstreamProducts: [...upstream].map(t => PRODUCT_BY_TYPE_ID.get(t)!.name),
       producerKeys: producerKeys.get(tid) ?? [],
+      chainPlanetCount: (() => {
+        const keys = new Set(producerKeys.get(tid) ?? [])
+        for (const utid of upstream) for (const k of producerKeys.get(utid) ?? []) keys.add(k)
+        return keys.size
+      })(),
       ...(sellInstead ? { sellInstead } : {}),
       ...(canExtend ? { canExtend } : {}),
     })

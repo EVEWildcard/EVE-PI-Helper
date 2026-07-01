@@ -75,9 +75,10 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
               <span className={styles.tierBadge} style={{ color: TIER_COLOR[t.product.tier] }}>{t.product.tier}</span>
               <div className={styles.nameCol}>
                 <span className={styles.name}>{t.product.name}</span>
-                <span className={styles.meta}>
-                  {t.producerKeys.length} planet{t.producerKeys.length !== 1 ? 's' : ''}
-                  {' · '}{t.upstreamProducts.length} upstream
+                <span className={styles.meta}
+                  title={`${t.producerKeys.length} planet${t.producerKeys.length !== 1 ? 's' : ''} make the final product; ${t.chainPlanetCount} planets across the whole chain`}>
+                  {t.chainPlanetCount} planet{t.chainPlanetCount !== 1 ? 's' : ''}
+                  {' · '}{t.upstreamProducts.length + 1} product{t.upstreamProducts.length + 1 !== 1 ? 's' : ''}
                 </span>
               </div>
 

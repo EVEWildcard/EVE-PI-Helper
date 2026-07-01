@@ -4,7 +4,7 @@ import { PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '.
 import type { PITier } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
-import { useChainSuggestions, useBalanceHints, type ChainSuggestion } from '../../hooks/useChainSuggestions'
+import { useChainSuggestions, useBalanceHints, type ChainSuggestion, type BalanceHint } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
 import { buildChainModel } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
@@ -159,42 +159,33 @@ function buildGraph(characters: StoredCharacter[]): {
   return { nodes, edges: earlyEdges, producedNames }
 }
 
-// ── P1 cluster merging ────────────────────────────────────────────────────────
-// One cluster per P2 consumer. Inside each cluster, members are sub-grouped by character.
+// ── duplicate clustering ────────────────────────────────────────────────────────
+// Collapse duplicate producers — same tier + same output signature — into one ×N
+// card, chain-wide, regardless of which consumers each feeds. A product made by a
+// single planet passes through unchanged, so unique/small chains stay fully
+// expanded and read exactly as before. Members are sub-grouped by character inside
+// each cluster. Applies to every tier (P1..P4), not just extractors.
 
-function clusterP1Nodes(nodes: ChainNode[], edges: ChainEdge[]): { nodes: ChainNode[], edges: ChainEdge[] } {
-  const p1Nodes = nodes.filter(n => n.column === 0)
-  const otherNodes = nodes.filter(n => n.column !== 0)
+const MERGE_MIN = 2  // a product made by this many planets or more collapses into one card
 
-  // Map each P1 node to its first P2 consumer
-  const nodeByKey = new Map(nodes.map(n => [n.key, n]))
-  const p1ToP2 = new Map<string, string>()
-  for (const e of edges) {
-    const from = nodeByKey.get(e.fromKey)
-    const to   = nodeByKey.get(e.toKey)
-    if (from?.column === 0 && to?.column === 1 && !p1ToP2.has(e.fromKey))
-      p1ToP2.set(e.fromKey, e.toKey)
+function clusterDuplicates(nodes: ChainNode[], edges: ChainEdge[]): { nodes: ChainNode[], edges: ChainEdge[] } {
+  // Signature = tier column + sorted output names, so a "Mechanical Parts" planet
+  // never merges with a "Mechanical Parts + Consumer Electronics" one.
+  const sigOf = (n: ChainNode) => `${n.column}|${[...n.outputNames].sort().join('~')}`
+
+  const groups = new Map<string, ChainNode[]>()
+  const passthrough: ChainNode[] = []  // unassigned + unique-product singletons
+  for (const n of nodes) {
+    if (n.unassigned || n.outputNames.length === 0) { passthrough.push(n); continue }
+    const arr = groups.get(sigOf(n)) ?? []; arr.push(n); groups.set(sigOf(n), arr)
   }
 
-  // Group P1 nodes by their P2 consumer
-  const byP2 = new Map<string, ChainNode[]>()
-  const orphanP1: ChainNode[] = []
-  for (const p1 of p1Nodes) {
-    const p2Key = p1ToP2.get(p1.key)
-    if (p2Key) {
-      if (!byP2.has(p2Key)) byP2.set(p2Key, [])
-      byP2.get(p2Key)!.push(p1)
-    } else {
-      orphanP1.push(p1)
-    }
-  }
-
-  // Build cluster nodes and a key-remap table
   const clusterNodes: ChainNode[] = []
-  const keyRemap = new Map<string, string>()  // old p1 key → cluster key
+  const keyRemap = new Map<string, string>()  // old node key → cluster key
 
-  for (const [p2Key, members] of byP2) {
-    const clusterKey = `cluster:${p2Key}`
+  for (const [sig, members] of groups) {
+    if (members.length < MERGE_MIN) { passthrough.push(...members); continue }
+    const clusterKey = `cluster:${sig}`
     for (const m of members) keyRemap.set(m.key, clusterKey)
 
     // Sub-group members by character, preserving row order within each character
@@ -217,42 +208,55 @@ function clusterP1Nodes(nodes: ChainNode[], edges: ChainEdge[]): { nodes: ChainN
       }
     }
 
+    // Members share the same output signature, so the rep carries the shared
+    // outputs + inputs (keeps input chips, balance-warning + suggestion matching).
+    const rep = members[0]
     clusterNodes.push({
       key: clusterKey,
       planetId: -1,
       planetName: '',
       planetType: '',
-      characterId: members[0].characterId,
+      characterId: rep.characterId,
       characterName: '',
-      outputTypeIds: members.flatMap(m => m.outputTypeIds),
-      outputNames:   members.flatMap(m => m.outputNames),
-      outputTiers:   members.flatMap(m => m.outputTiers),
-      outputName:    members[0].outputName,
-      outputTier:    'P1',
-      inputNames:    [],
+      outputTypeIds: rep.outputTypeIds,
+      outputNames:   rep.outputNames,
+      outputTiers:   rep.outputTiers,
+      outputName:    rep.outputName,
+      outputTier:    rep.outputTier,
+      inputNames:    rep.inputNames,
       unassigned:    false,
-      column:        0,
-      row:           members[0].row,
+      column:        rep.column,
+      row:           Math.min(...members.map(m => m.row)),
       isCluster:     true,
       clusterMembers: sortedMembers,
     })
   }
 
-  // Reassign cluster rows sequentially; orphan P1s continue after clusters
-  clusterNodes.sort((a, b) => a.row - b.row).forEach((n, i) => { n.row = i })
-  orphanP1.sort((a, b) => a.row - b.row).forEach((n, i) => { n.row = clusterNodes.length + i })
+  const outNodes = [...passthrough, ...clusterNodes]
 
-  // Remap edges and deduplicate
+  // Re-sequence rows per column, preserving the top-down consumer ordering that
+  // buildGraph produced (clusters land near their earliest member's old row).
+  const byCol = new Map<number, ChainNode[]>()
+  for (const n of outNodes) {
+    const arr = byCol.get(n.column) ?? []; arr.push(n); byCol.set(n.column, arr)
+  }
+  for (const arr of byCol.values()) {
+    arr.sort((a, b) => a.row - b.row).forEach((n, i) => { n.row = i })
+  }
+
+  // Remap BOTH endpoints (a cluster can be a source or a destination now), drop
+  // self-edges, and deduplicate.
   const seen = new Set<string>()
   const newEdges = edges
-    .map(e => ({ ...e, fromKey: keyRemap.get(e.fromKey) ?? e.fromKey }))
+    .map(e => ({ ...e, fromKey: keyRemap.get(e.fromKey) ?? e.fromKey, toKey: keyRemap.get(e.toKey) ?? e.toKey }))
     .filter(e => {
+      if (e.fromKey === e.toKey) return false
       const k = `${e.fromKey}→${e.toKey}:${e.productName}`
       if (seen.has(k)) return false
       seen.add(k); return true
     })
 
-  return { nodes: [...otherNodes, ...clusterNodes, ...orphanP1], edges: newEdges }
+  return { nodes: outNodes, edges: newEdges }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -414,6 +418,8 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   // Set while hovering a balance-warning chip → locates the responsible nodes.
   const [warnProduct, setWarnProduct] = useState<string | null>(null)
+  // Overproduction is the lesser evil; collapse it by default when there's a lot.
+  const [showExcess, setShowExcess] = useState(false)
   const [altHeld, setAltHeld] = useState(false)
   useEffect(() => {
     const down = (e: KeyboardEvent) => { if (e.key === 'Alt') setAltHeld(true) }
@@ -441,6 +447,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const { systemPlanets, loading: systemPlanetsLoading } = useSystemPlanets(characters)
   const suggestions = useChainSuggestions(characters, prices, assumeMaxSkills, systemPlanets, 30)
   const balanceHints = useBalanceHints(characters)
+  // Split by severity: bottlenecks (shortfalls) lose money → always up top;
+  // overproduction is the lesser evil → grouped below, collapsible when noisy.
+  const bottlenecks = balanceHints.filter(h => h.type === 'bottleneck')
+  const excess = balanceHints.filter(h => h.type === 'excess')
   // Current income = Σ terminal iskHrNow — the basis for the ISK-impact filter.
   const chainModel = useMemo(() => buildChainModel(characters, prices), [characters, prices])
   const currentIncome = useMemo(
@@ -449,7 +459,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   )
 
   const { nodes: rawNodes, edges: rawEdges, producedNames } = useMemo(() => buildGraph(characters), [characters])
-  const { nodes: baseNodes, edges: baseEdges } = useMemo(() => clusterP1Nodes(rawNodes, rawEdges), [rawNodes, rawEdges])
+  const { nodes: baseNodes, edges: baseEdges } = useMemo(() => clusterDuplicates(rawNodes, rawEdges), [rawNodes, rawEdges])
 
   // In-graph ghost suggestion nodes are superseded by the suggestions column
   // (right side), so the graph renders just the real planets.
@@ -464,15 +474,18 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const CHAR_PALETTE = [
     '#3cc8a0', '#e05880', '#a0c840', '#d070e0', '#40c0e0', '#e09040', '#60d090', '#e06098'
   ]
+  // Built from the pre-cluster nodes (one per planet) so every alt gets a color —
+  // a cluster only carries its first member's characterId, so deriving from the
+  // post-cluster `nodes` could drop an alt whose planets all merged away.
   const charColorByCharId = useMemo(() => {
     const seen: number[] = []
-    for (const n of nodes) {
+    for (const n of rawNodes) {
       if (n.characterId > 0 && !seen.includes(n.characterId)) seen.push(n.characterId)
     }
     const m = new Map<number, string>()
     seen.forEach((id, i) => m.set(id, CHAR_PALETTE[i % CHAR_PALETTE.length]))
     return m
-  }, [nodes])
+  }, [rawNodes])
 
   // Past ~4 alts the per-alt rainbow is just noise: color the whole graph by
   // product TIER and swap the legend for a stats line. Hovering a chain still
@@ -789,6 +802,27 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     return { planets, extractors, factories, alts: characters.filter(c => c.planets.length > 0).length }
   })()
 
+  const renderHint = (hint: BalanceHint, idx: number) => {
+    const isBottleneck = hint.type === 'bottleneck'
+    return (
+      <div
+        key={`${hint.productName}-${idx}`}
+        className={`${styles.balanceHint} ${isBottleneck ? styles.balanceHintSevere : ''} ${warnProduct === hint.productName ? styles.balanceHintActive : ''}`}
+        onMouseEnter={() => setWarnProduct(hint.productName)}
+        onMouseLeave={() => setWarnProduct(null)}
+        title={isBottleneck
+          ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. This is costing you output. Hover to locate it; consider adding another extractor.`
+          : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. The surplus can be sold. Hover to locate it; consider repurposing an extractor.`
+        }
+      >
+        <span className={styles.balanceHintIcon}>{isBottleneck ? '⚡' : '〰'}</span>
+        <span className={styles.balanceHintText}>
+          <strong>{hint.productName}</strong> {isBottleneck ? 'shortfall' : 'overproduced'} <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span>
+        </span>
+      </div>
+    )
+  }
+
   return (
     <>
     <div className={styles.root}>
@@ -825,27 +859,35 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             shows); hover a row to locate it in the graph. */}
         {balanceHints.length > 0 && (
           <div className={styles.warningsPanel} style={{ right: showSuggestPanel ? 252 : 12 }}>
-            <div className={styles.warningsTitle}>Issues · {balanceHints.length}</div>
-            {balanceHints.map((hint, idx) => {
-              const isBottleneck = hint.type === 'bottleneck'
-              return (
-                <div
-                  key={`${hint.productName}-${idx}`}
-                  className={`${styles.balanceHint} ${warnProduct === hint.productName ? styles.balanceHintActive : ''}`}
-                  onMouseEnter={() => setWarnProduct(hint.productName)}
-                  onMouseLeave={() => setWarnProduct(null)}
-                  title={isBottleneck
-                    ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. Hover to locate it; consider adding another extractor.`
-                    : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. Hover to locate it; consider repurposing an extractor.`
-                  }
+            <div className={styles.warningsTitle}>
+              Issues · {bottlenecks.length ? `${bottlenecks.length} shortfall${bottlenecks.length !== 1 ? 's' : ''}` : 'none critical'}
+            </div>
+            {/* Shortfalls first — these are actually costing you output. */}
+            {bottlenecks.map(renderHint)}
+            {/* Overproduction: the surplus can be sold, so it's demoted and
+                collapsed by default once there's more than a couple. */}
+            {excess.length > 0 && (
+              excess.length <= 2 || showExcess ? (
+                <>
+                  {excess.length > 2 && (
+                    <button
+                      className={styles.excessToggle}
+                      onClick={() => setShowExcess(false)}
+                    >
+                      ▾ Overproduced · {excess.length} (can be sold)
+                    </button>
+                  )}
+                  {excess.map(renderHint)}
+                </>
+              ) : (
+                <button
+                  className={styles.excessToggle}
+                  onClick={() => setShowExcess(true)}
                 >
-                  <span className={styles.balanceHintIcon}>{isBottleneck ? '⚡' : '〰'}</span>
-                  <span className={styles.balanceHintText}>
-                    <strong>{hint.productName}</strong> {isBottleneck ? 'bottleneck' : 'overproduced'} <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span>
-                  </span>
-                </div>
+                  ▸ Overproduced · {excess.length} (can be sold)
+                </button>
               )
-            })}
+            )}
           </div>
         )}
         {/* Suggestions column — second column pinned to the far right (issues sit
@@ -1077,7 +1119,29 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
   function PlanetNode({ node, producedNames, importedNames, consumedOutputs, feedsLabel, x, y, hovered, dimmed, borderColor, tierMode, charColorByCharId, onHover, onInputRef }, ref) {
     const dotColor = PLANET_COLOR[node.planetType] ?? '#404050'
 
-    // P1 cluster node: grouped by P2 consumer, sub-divided by character inside
+    // Shared input-chip renderer — used by both the normal card and the cluster
+    // card (all members of a cluster share the same inputs).
+    const renderInput = (name: string) => {
+      const covered = producedNames.has(name)
+      const isSelfExtracted = PRODUCT_BY_NAME.get(name)?.tier === 'P0'
+      // Not produced anywhere, but not a genuine gap either — you buy/haul it in.
+      const isImported = !covered && !isSelfExtracted && importedNames.has(name)
+      const cls = isSelfExtracted ? styles.nodeInputSelf
+        : covered ? styles.nodeInputCovered
+        : isImported ? styles.nodeInputImported
+        : styles.nodeInputMissing
+      const title = isSelfExtracted
+        ? `Extracted on this planet (P0 → P1)`
+        : covered ? `Supplied by another planet`
+        : isImported ? `Imported — bought or hauled in, not produced from your own chain`
+        : getMissingInputHint(name)
+      return (
+        <span key={name} ref={el => onInputRef?.(name, el)}
+          className={`${styles.nodeInput} ${cls}`} title={title}>{name}</span>
+      )
+    }
+
+    // Cluster node: duplicate producers of one product, sub-divided by character.
     if (node.isCluster && node.clusterMembers) {
       // Group members by character in order of first appearance
       const charOrder: number[] = []
@@ -1086,8 +1150,8 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
         if (!byChar.has(m.characterId)) { byChar.set(m.characterId, []); charOrder.push(m.characterId) }
         byChar.get(m.characterId)!.push(m)
       }
-      // In tier-mode the cluster colors by its product tier (P1) like every other
-      // node; otherwise it keeps the per-alt look (single alt → that alt's color,
+      // In tier-mode the cluster colors by its product tier like every other node;
+      // otherwise it keeps the per-alt look (single alt → that alt's color,
       // multiple → neutral border + a rainbow stripe of the contributing alts).
       const clusterBorder = tierMode
         ? borderColor
@@ -1095,6 +1159,20 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
       const clusterStripe = tierMode
         ? borderColor
         : `linear-gradient(90deg, ${charOrder.map(id => charColorByCharId.get(id) ?? '#aaa').join(', ')})`
+
+      // Cap the member list so a huge cluster (e.g. Precious Metals ×40) stays a
+      // readable card; the rest collapse into a "+N more" line.
+      const MEMBER_CAP = 12
+      let budget = MEMBER_CAP
+      const cappedGroups: { id: number; members: ClusterMember[] }[] = []
+      for (const id of charOrder) {
+        if (budget <= 0) break
+        const slice = byChar.get(id)!.slice(0, budget)
+        budget -= slice.length
+        cappedGroups.push({ id, members: slice })
+      }
+      const overflow = node.clusterMembers.length - (MEMBER_CAP - budget)
+
       return (
         <div ref={ref}
           className={`${styles.node} ${styles.nodeCluster} ${hovered ? styles.nodeHovered : ''} ${dimmed ? styles.nodeDimmed : ''}`}
@@ -1107,26 +1185,34 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
         >
           <div className={styles.nodeTierStripe} style={{ background: clusterStripe }} />
           <div className={styles.nodeClusterHeader}>
-            <span className={styles.nodeClusterBadge}>P1</span>
-            <span className={styles.nodeClusterTitle}>Extractors ×{node.clusterMembers.length}</span>
+            <span className={styles.nodeClusterBadge}>{node.outputTier}</span>
+            <span className={styles.nodeClusterTitle}>{node.outputName || node.outputNames.join(', ')}</span>
+            <span className={styles.nodeClusterCount}>×{node.clusterMembers.length}</span>
           </div>
+          {feedsLabel && <div className={styles.nodeChainLabel}>→ {feedsLabel}</div>}
           <div className={styles.nodeClusterRows}>
-            {charOrder.map((charId) => {
-              const members = byChar.get(charId)!
-              const color = charColorByCharId.get(charId) ?? '#aaa'
+            {cappedGroups.map(({ id, members }) => {
+              const color = charColorByCharId.get(id) ?? '#aaa'
               return (
-                <div key={charId} className={styles.nodeClusterOwnerGroup} style={{ '--owner-color': color } as React.CSSProperties}>
+                <div key={id} className={styles.nodeClusterOwnerGroup} style={{ '--owner-color': color } as React.CSSProperties}>
                   <span className={styles.nodeClusterOwnerName}>{members[0].characterName}</span>
                   {members.map((m, i) => (
                     <div key={i} className={styles.nodeClusterRow}>
-                      <span className={styles.nodeClusterOutput}>{m.outputNames.join(', ')}</span>
                       <span className={styles.nodeClusterChar}>{m.planetName}</span>
                     </div>
                   ))}
                 </div>
               )
             })}
+            {overflow > 0 && (
+              <div className={styles.nodeClusterMore}>+{overflow} more planet{overflow !== 1 ? 's' : ''}</div>
+            )}
           </div>
+          {node.inputNames.length > 0 && (
+            <div className={styles.nodeInputs}>
+              {node.inputNames.map(n => renderInput(n))}
+            </div>
+          )}
         </div>
       )
     }
@@ -1177,26 +1263,6 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
                 style={{ '--tier-color': TIER_COLOR[tier] } as React.CSSProperties}>
                 <span className={styles.nodeTierBadge}>{tier}</span>{n}
               </span>
-            )
-          }
-
-          const renderInput = (name: string) => {
-            const covered = producedNames.has(name)
-            const isSelfExtracted = PRODUCT_BY_NAME.get(name)?.tier === 'P0'
-            // Not produced anywhere, but not a genuine gap either — you buy/haul it in.
-            const isImported = !covered && !isSelfExtracted && importedNames.has(name)
-            const cls = isSelfExtracted ? styles.nodeInputSelf
-              : covered ? styles.nodeInputCovered
-              : isImported ? styles.nodeInputImported
-              : styles.nodeInputMissing
-            const title = isSelfExtracted
-              ? `Extracted on this planet (P0 → P1)`
-              : covered ? `Supplied by another planet`
-              : isImported ? `Imported — bought or hauled in, not produced from your own chain`
-              : getMissingInputHint(name)
-            return (
-              <span key={name} ref={el => onInputRef?.(name, el)}
-                className={`${styles.nodeInput} ${cls}`} title={title}>{name}</span>
             )
           }
 

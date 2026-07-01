@@ -648,8 +648,13 @@ export function computeBalanceHints(characters: StoredCharacter[]): BalanceHint[
       }
     }
 
-    // Surface the most extreme imbalance first
-    return hints.sort((a, b) => Math.abs(b.consumers - b.producers) - Math.abs(a.consumers - a.producers))
+    // Bottlenecks (shortfalls) cost you money and come first; excess can at worst
+    // be sold, so it's the lesser evil. Within each group, the most extreme
+    // imbalance surfaces first.
+    return hints.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'bottleneck' ? -1 : 1
+      return Math.abs(b.consumers - b.producers) - Math.abs(a.consumers - a.producers)
+    })
 }
 
 export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {

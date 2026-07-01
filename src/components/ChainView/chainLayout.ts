@@ -238,9 +238,9 @@ export interface ArrowColorOptions {
 }
 
 /**
- * Pass 2: build the arrow paths from settled positions + sizes. Cluster nodes
- * emit one arrow per (cluster, destination) pair from the cluster's center; all
- * other edges emit one arrow each. Overlapping labels are pushed downward.
+ * Pass 2: build the arrow paths from settled positions + sizes. One arrow per
+ * (from → to) node pair, so a cluster (or any node) with several edges to the
+ * same neighbor draws a single labelled arrow. Overlapping labels are pushed down.
  */
 export function computeArrows(
   nodes: ChainNode[],
@@ -271,48 +271,25 @@ export function computeArrows(
   const newArrows: ArrowPath[] = []
   let maxX = 0, maxY = 0
 
-  // Cluster nodes → destination: one arrow per (clusterKey, toKey) pair,
-  // originating from the cluster node's center.
-  // All other edges: one arrow per edge as normal.
-  const clusterKeys = new Set(nodes.filter(n => n.isCluster).map(n => n.key))
-
-  const clusterEdgeGroups = new Map<string, ChainEdge[]>()
-  const regularEdges: ChainEdge[] = []
-
+  // One arrow per (from → to) node pair, joining every product carried on that
+  // pair into a single label. This handles clusters as source, destination, or
+  // both, and plain node→node edges, all the same way.
+  const pairs = new Map<string, ChainEdge[]>()
   for (const e of edges) {
-    if (clusterKeys.has(e.fromKey)) {
-      const gk = `${e.fromKey}→${e.toKey}`
-      if (!clusterEdgeGroups.has(gk)) clusterEdgeGroups.set(gk, [])
-      clusterEdgeGroups.get(gk)!.push(e)
-    } else {
-      regularEdges.push(e)
-    }
+    const gk = `${e.fromKey}→${e.toKey}`
+    const arr = pairs.get(gk) ?? []; arr.push(e); pairs.set(gk, arr)
   }
 
-  // Cluster arrows: one per cluster→dest pair
-  for (const destEdges of clusterEdgeGroups.values()) {
-    const e = destEdges[0]
+  for (const pairEdges of pairs.values()) {
+    const e = pairEdges[0]
     const src = positions.get(e.fromKey)
     const dst = positions.get(e.toKey)
     if (!src || !dst) continue
     const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
-    const label = [...new Set(destEdges.map(g => g.productName))].join(', ')
+    const label = [...new Set(pairEdges.map(g => g.productName))].join(', ')
     const isGhost = nodeByKey.get(e.toKey)?.suggested === true
     const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? tierColor[e.tier])
     newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
-    maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
-    maxY = Math.max(maxY, src.bottom + PAD_Y, dst.bottom + PAD_Y)
-  }
-
-  // Regular arrows: one per edge
-  for (const e of regularEdges) {
-    const src = positions.get(e.fromKey)
-    const dst = positions.get(e.toKey)
-    if (!src || !dst) continue
-    const x1 = src.cx, y1 = src.top, x2 = dst.cx, y2 = dst.bottom
-    const isGhost = nodeByKey.get(e.toKey)?.suggested === true
-    const color = isGhost ? '#4ab095' : (terminalColorByNode.get(e.fromKey) ?? tierColor[e.tier])
-    newArrows.push({ d: makeBezierV(x1, y1, x2, y2), color, label: e.productName, labelX: (x1+x2)/2, labelY: (y1+y2)/2 - 6, fromKey: e.fromKey, toKey: e.toKey, ghost: isGhost })
     maxX = Math.max(maxX, src.right + PAD_X, dst.right + PAD_X)
     maxY = Math.max(maxY, src.bottom + PAD_Y, dst.bottom + PAD_Y)
   }
