@@ -3,7 +3,7 @@ import type { Planet, StoredCharacter } from '../types/api'
 import { DEFAULT_PI_SKILLS } from '../types/api'
 import { PRODUCT_BY_NAME } from '../data/schematics'
 import type { SystemPlanetsMap } from './useSystemPlanets'
-import { computeChainSuggestions, computeBalanceHints } from './useChainSuggestions'
+import { computeChainSuggestions, computeBalanceHints, buildShortfallSuggestion } from './useChainSuggestions'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
 let pid = 1
@@ -117,5 +117,73 @@ describe('computeBalanceHints', () => {
     const hints = computeBalanceHints([c])
     // Miniature Electronics is sold directly — not an imbalance.
     expect(hints.some(h => h.productName === 'Miniature Electronics')).toBe(false)
+  })
+})
+
+describe('buildShortfallSuggestion', () => {
+  it('builds a one-step extractor plan for a P1 shortfall', () => {
+    // One Silicon extractor feeding two Miniature Electronics factories.
+    const c = char('A', [
+      planet('Esi', ['Silicon']),
+      planet('Ech', ['Chiral Structures']),
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const hint = computeBalanceHints([c]).find(h => h.productName === 'Silicon')!
+    const s = buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)
+
+    expect(s).not.toBeNull()
+    expect(s!.key).toBe(`shortfall:${PRODUCT_BY_NAME.get('Silicon')!.typeId}`)
+    expect(s!.chainSteps).toHaveLength(1)
+    expect(s!.chainSteps[0].role).toBe('extractor')
+    expect(s!.chainSteps[0].produces).toBe('Silicon')
+    expect(s!.shortfallOf).toEqual({ name: 'Silicon', currentProducers: 1, consumers: 2 })
+  })
+
+  it('builds a single factory step for a P2 shortfall whose inputs are all produced', () => {
+    const c = char('A', [
+      planet('Esi', ['Silicon']),
+      planet('Ech', ['Chiral Structures']),
+      planet('Fme', ['Miniature Electronics']),
+    ])
+    const hint = { type: 'bottleneck' as const, productName: 'Miniature Electronics', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)
+
+    expect(s).not.toBeNull()
+    expect(s!.chainSteps).toHaveLength(1)
+    expect(s!.chainSteps[0].role).toBe('factory')
+    expect(s!.chainSteps[0].produces).toBe('Miniature Electronics')
+    expect(s!.chainSteps[0].factoryInputs).toEqual(expect.arrayContaining(['Silicon', 'Chiral Structures']))
+  })
+
+  it('also emits steps for genuinely missing sub-inputs of the short product', () => {
+    // Miniature Electronics shortfall, but nobody extracts Chiral Structures.
+    const c = char('A', [
+      planet('Esi', ['Silicon']),
+      planet('Fme', ['Miniature Electronics']),
+    ])
+    const hint = { type: 'bottleneck' as const, productName: 'Miniature Electronics', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)
+
+    expect(s).not.toBeNull()
+    const produces = s!.chainSteps.map(st => st.produces)
+    expect(produces).toContain('Chiral Structures')
+    expect(produces).toContain('Miniature Electronics')
+  })
+
+  it('marks the plan blocked when no character has a free planet slot', () => {
+    const c = char('A', [planet('Esi', ['Silicon'])], 0)  // IC 0 → max 1 planet, already used
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)
+
+    expect(s).not.toBeNull()
+    expect(s!.blocked).toBeDefined()
+    expect(s!.blocked!.extraSlotsNeeded).toBe(1)
+  })
+
+  it('returns null for an unknown product', () => {
+    const c = char('A', [planet('Esi', ['Silicon'])])
+    const hint = { type: 'bottleneck' as const, productName: 'Not A Product', producers: 1, consumers: 2 }
+    expect(buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)).toBeNull()
   })
 })

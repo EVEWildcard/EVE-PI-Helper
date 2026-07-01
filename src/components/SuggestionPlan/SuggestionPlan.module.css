@@ -69,6 +69,18 @@
 }
 .closeBtn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 
+/* ── Shortfall banner — red like the graph's shortfall issues, not amber ── */
+
+.shortfallBanner {
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #e07a7a;
+  background: rgba(214,90,90,0.08);
+  border-bottom: 1px solid rgba(214,90,90,0.2);
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+
 /* ── Blocked banner ── */
 
 .blockedBanner {
