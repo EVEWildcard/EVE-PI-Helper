@@ -100,20 +100,21 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
 
   const maxAssignedCol = nodes.reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Hover highlights the whole chain a product participates in (its ancestors and
-  // descendants), dimming the rest — same reach model as the planet graph.
-  const { fwd, bwd } = useMemo(() => {
-    const fwd = new Map<string, Set<string>>()
+  // Hover lights only what flows UP INTO the hovered product (its ancestors +
+  // self), dimming the rest — same as the planet graph. To inspect a downstream
+  // consumer, hover that node.
+  const bwd = useMemo(() => {
     const bwd = new Map<string, Set<string>>()
-    const add = (mp: Map<string, Set<string>>, a: string, b: string) => { if (!mp.has(a)) mp.set(a, new Set()); mp.get(a)!.add(b) }
-    for (const e of edges) { add(fwd, e.fromKey, e.toKey); add(bwd, e.toKey, e.fromKey) }
-    return { fwd, bwd }
+    for (const e of edges) {
+      if (!bwd.has(e.toKey)) bwd.set(e.toKey, new Set())
+      bwd.get(e.toKey)!.add(e.fromKey)
+    }
+    return bwd
   }, [edges])
   const highlight = useMemo(() => {
     if (hoveredKey === null) return null
-    const down = reachClosure([hoveredKey], fwd, new Set([hoveredKey]))
-    return reachClosure([...down], bwd, new Set(down))
-  }, [hoveredKey, fwd, bwd])
+    return reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
+  }, [hoveredKey, bwd])
 
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
   const vEstColY = (col: number) => vEstColYPure(col, colCounts, maxAssignedCol)
