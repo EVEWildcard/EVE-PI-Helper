@@ -13,7 +13,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pkce = session.pkce
 
   if (!code || !pkce || state !== pkce.state) {
-    res.redirect(302, '/?login=error')
+    res.redirect(302, '/')
     return
   }
 
@@ -25,11 +25,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     session.tokens = tokens
     delete session.pkce
     await session.save()
-    res.redirect(302, '/?login=ok')
+    res.redirect(302, '/')
   } catch (err) {
     console.error('[callback] token exchange failed:', err)
     delete session.pkce
     await session.save()
-    res.redirect(302, '/?login=error')
+    res.redirect(302, '/')
   }
 }
