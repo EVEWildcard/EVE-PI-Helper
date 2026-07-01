@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { StoredCharacter, Planet } from '../types/api'
 import {
-  PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME,
+  PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME, SCHEMATIC_BY_OUTPUT,
   P1_TO_P2_SCHEMATICS, P2_TO_P3_SCHEMATICS, P3_TO_P4_SCHEMATICS,
 } from '../data/schematics'
 import type { PIProduct, PISchematic } from '../data/schematics'
@@ -58,6 +58,9 @@ export interface ChainSuggestion {
   blocked?: BlockedInfo         // present when current skills are insufficient
   /** When this suggestion is a prerequisite step, this is the end-goal product it unlocks */
   prereqFor?: PIProduct
+  /** When this suggestion fixes a shortfall (balance-hint bottleneck): add one MORE
+      producer of an already-produced product. Verify counts producers, not existence. */
+  shortfallOf?: { name: string; currentProducers: number; consumers: number }
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -80,6 +83,52 @@ function formatTrainTime(hours: number): string {
   if (hours < 1) return `~${Math.round(hours * 60)}m`
   if (hours < 24) return `~${Math.round(hours)}h`
   return `~${Math.round(hours / 24)}d`
+}
+
+// ── Shared setup helpers ──────────────────────────────────────────────────────
+// Used by both the main suggestion engine and the one-off shortfall-fix builder.
+
+// Effective IC: real skill, OR fake skillup planned, OR actively training — whichever is highest
+function effectiveIC(char: StoredCharacter, assumeMaxSkills: boolean): number {
+  const real = char.piSkills.interplanetaryConsolidation
+  const override = char.skillOverrides?.interplanetaryConsolidation ?? 0
+  const training = char.skillTraining?.interplanetaryConsolidation?.toLevel ?? 0
+  return assumeMaxSkills ? 5 : Math.max(real, override, training)
+}
+
+// Configured planets = have outputs; empty = colonized but unconfigured (free to repurpose)
+function computeCharsWithSlots(characters: StoredCharacter[], assumeMaxSkills: boolean) {
+  return characters
+    .map(c => {
+      const maxPlanets = 1 + effectiveIC(c, assumeMaxSkills)
+      const emptyPlanets = c.planets.filter(p => (p.outputs?.length ?? 0) === 0).length
+      const newSlots = Math.max(0, maxPlanets - c.planets.length)
+      return { char: c, slots: newSlots + emptyPlanets }
+    })
+    .filter(c => c.slots > 0)
+    .sort((a, b) => b.slots - a.slots)
+}
+
+// Per character: planet categories reachable in their systems, minus occupied ones
+function computeCharAvailableCategories(
+  characters: StoredCharacter[],
+  systemPlanets: SystemPlanetsMap,
+): Map<number, Map<string, number>> {
+  const result = new Map<number, Map<string, number>>()
+  for (const char of characters) {
+    const catCount = new Map<string, number>()
+    for (const planet of char.planets) {
+      if (!planet.systemId) continue
+      for (const sp of systemPlanets.get(planet.systemId) ?? []) {
+        catCount.set(sp.category, (catCount.get(sp.category) ?? 0) + 1)
+      }
+    }
+    for (const planet of char.planets) {
+      if (planet.type) catCount.set(planet.type, Math.max(0, (catCount.get(planet.type) ?? 0) - 1))
+    }
+    result.set(char.characterId, catCount)
+  }
+  return result
 }
 
 // ── Recursive input evaluator ─────────────────────────────────────────────────
@@ -241,41 +290,9 @@ export function computeChainSuggestions(
       if (rank > highestTierRank) highestTierRank = rank
     }
 
-    // Effective IC: real skill, OR fake skillup planned, OR actively training — whichever is highest
-    function effectiveIC(char: StoredCharacter): number {
-      const real = char.piSkills.interplanetaryConsolidation
-      const override = char.skillOverrides?.interplanetaryConsolidation ?? 0
-      const training = char.skillTraining?.interplanetaryConsolidation?.toLevel ?? 0
-      return assumeMaxSkills ? 5 : Math.max(real, override, training)
-    }
-
-    // Configured planets = have outputs; empty = colonized but unconfigured (free to repurpose)
-    const charsWithSlots = characters
-      .map(c => {
-        const maxPlanets = 1 + effectiveIC(c)
-        const emptyPlanets = c.planets.filter(p => (p.outputs?.length ?? 0) === 0).length
-        const newSlots = Math.max(0, maxPlanets - c.planets.length)
-        return { char: c, slots: newSlots + emptyPlanets }
-      })
-      .filter(c => c.slots > 0)
-      .sort((a, b) => b.slots - a.slots)
-
+    const charsWithSlots = computeCharsWithSlots(characters, assumeMaxSkills)
     const totalSlotsAvailable = charsWithSlots.reduce((s, c) => s + c.slots, 0)
-
-    const charAvailableCategories = new Map<number, Map<string, number>>()
-    for (const char of characters) {
-      const catCount = new Map<string, number>()
-      for (const planet of char.planets) {
-        if (!planet.systemId) continue
-        for (const sp of systemPlanets.get(planet.systemId) ?? []) {
-          catCount.set(sp.category, (catCount.get(sp.category) ?? 0) + 1)
-        }
-      }
-      for (const planet of char.planets) {
-        if (planet.type) catCount.set(planet.type, Math.max(0, (catCount.get(planet.type) ?? 0) - 1))
-      }
-      charAvailableCategories.set(char.characterId, catCount)
-    }
+    const charAvailableCategories = computeCharAvailableCategories(characters, systemPlanets)
 
     // Consumed names: products fed as input to another planet
     const consumedNames = new Set<string>()
@@ -659,4 +676,79 @@ export function computeBalanceHints(characters: StoredCharacter[]): BalanceHint[
 
 export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
   return useMemo(() => computeBalanceHints(characters), [characters])
+}
+
+// ── Shortfall fix plan ────────────────────────────────────────────────────────
+// One-off plan for a bottleneck balance hint: add one MORE producer of the short
+// product (extractor for P1, factory for P2+). Reuses the chain-step builder by
+// pretending the product isn't made yet, so any genuinely missing sub-inputs get
+// steps too. Returns null when nothing sensible can be built.
+
+export function buildShortfallSuggestion(
+  hint: BalanceHint,
+  characters: StoredCharacter[],
+  prices: Record<number, number>,
+  assumeMaxSkills: boolean,
+  systemPlanets: SystemPlanetsMap,
+): ChainSuggestion | null {
+  const product = PRODUCT_BY_NAME.get(hint.productName)
+  if (!product || characters.length === 0) return null
+
+  const allSchematics = [...P1_TO_P2_SCHEMATICS, ...P2_TO_P3_SCHEMATICS, ...P3_TO_P4_SCHEMATICS]
+
+  const produced = new Set<string>()
+  for (const char of characters) {
+    for (const planet of char.planets) {
+      for (const name of planet.outputNames ?? []) if (name) produced.add(name)
+    }
+  }
+  // Pretend the short product isn't made yet → walk() emits a step for one more producer
+  produced.delete(product.name)
+
+  const charsWithSlots = computeCharsWithSlots(characters, assumeMaxSkills)
+  const charAvailableCategories = computeCharAvailableCategories(characters, systemPlanets)
+
+  const chainSteps = buildChainSteps(
+    product.name, produced, charAvailableCategories, charsWithSlots, characters, allSchematics
+  )
+  if (chainSteps.length === 0) return null
+
+  const totalSlotsAvailable = charsWithSlots.reduce((s, c) => s + c.slots, 0)
+
+  // Rough value: one more producer's output at market price (0 if unpriced —
+  // the plan is still useful, the header just shows 0)
+  const sch = SCHEMATIC_BY_OUTPUT.get(product.typeId)
+  const price = prices[product.typeId] ?? 0
+  const iskHr = sch && price ? (sch.output.quantity / sch.cycleTime) * 3600 * FACTORY_COUNT_ESTIMATE * price : 0
+
+  let blocked: BlockedInfo | undefined
+  if (totalSlotsAvailable < chainSteps.length && !assumeMaxSkills) {
+    const extra = chainSteps.length - totalSlotsAvailable
+    let bestChar = characters[0]
+    for (const c of characters) {
+      if (c.piSkills.interplanetaryConsolidation < (bestChar?.piSkills.interplanetaryConsolidation ?? 0))
+        bestChar = c
+    }
+    const curLevel = bestChar?.piSkills.interplanetaryConsolidation ?? 0
+    const targetLevel = Math.min(5, curLevel + extra)
+    let trainHours = 0
+    for (let lv = curLevel + 1; lv <= targetLevel; lv++) trainHours += IC_TRAIN_HOURS[lv] ?? 0
+    blocked = { extraSlotsNeeded: extra, trainFromLevel: curLevel, trainToLevel: targetLevel, trainTimeHours: trainHours }
+  }
+
+  const bestChar = charsWithSlots[0]?.char ?? characters[0]
+  return {
+    key: `shortfall:${product.typeId}`,
+    product,
+    schematic: sch,
+    inputs: [],
+    characterName: bestChar.characterName,
+    characterId: bestChar.characterId,
+    slotsNeeded: chainSteps.length,
+    slotsAvailable: totalSlotsAvailable,
+    iskHr,
+    chainSteps,
+    shortfallOf: { name: product.name, currentProducers: hint.producers, consumers: hint.consumers },
+    ...(blocked ? { blocked } : {}),
+  }
 }

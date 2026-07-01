@@ -126,12 +126,21 @@ function checkFulfilled(s: ChainSuggestion, chars: StoredCharacter[]): { ok: boo
   for (const inp of s.inputs) {
     if (inp.status === 'needsExtractor' && !allProduced.has(inp.name)) missing.push(inp.name)
   }
-  // Check all intermediate factory outputs
+  // Check all chain-step outputs. For a shortfall fix the product was already
+  // produced, so mere existence proves nothing — its own step is checked by
+  // producer COUNT below instead.
   for (const step of s.chainSteps) {
-    if (step.role === 'factory' && !allProduced.has(step.produces)) missing.push(step.produces)
+    if (step.produces === s.shortfallOf?.name) continue
+    if ((step.role === 'factory' || s.shortfallOf) && !allProduced.has(step.produces)) missing.push(step.produces)
   }
   // Check final product
-  if (!allProduced.has(s.product.name)) missing.push(s.product.name)
+  if (s.shortfallOf) {
+    const producers = chars.reduce(
+      (n, c) => n + c.planets.filter(p => (p.outputNames ?? []).includes(s.shortfallOf!.name)).length, 0)
+    if (producers <= s.shortfallOf.currentProducers) missing.push(`another ${s.shortfallOf.name} producer`)
+  } else if (!allProduced.has(s.product.name)) {
+    missing.push(s.product.name)
+  }
 
   return { ok: missing.length === 0, missing: [...new Set(missing)] }
 }
@@ -219,6 +228,13 @@ export function SuggestionPlan({ suggestion: s, characters, onClose, onVerified 
         </div>
         <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
       </div>
+
+      {/* Shortfall context */}
+      {s.shortfallOf && (
+        <div className={styles.shortfallBanner}>
+          ⚡ {s.shortfallOf.name} shortfall — {s.shortfallOf.currentProducers} producer{s.shortfallOf.currentProducers !== 1 ? 's' : ''} feeding {s.shortfallOf.consumers} consumer{s.shortfallOf.consumers !== 1 ? 's' : ''}. Add one more producer to restore throughput.
+        </div>
+      )}
 
       {/* Skills warning */}
       {s.blocked && (() => {
