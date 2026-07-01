@@ -118,7 +118,6 @@ declare global {
       updatePISkills: (characterId: number, skills: PISkillLevels) => Promise<boolean>
       setSkillOverrides: (characterId: number, overrides: Partial<Record<keyof PISkillLevels, number>>) => Promise<StoredCharacter | null>
       clearSkillOverrides: (characterId: number) => Promise<StoredCharacter | null>
-      addPlanet: (characterId: number, type: string) => Promise<Planet>
       removePlanet: (characterId: number, planetId: number) => Promise<boolean>
       renamePlanet: (characterId: number, planetId: number, name: string) => Promise<boolean>
       setPlanetOutputs: (characterId: number, planetId: number, typeIds: number[]) => Promise<boolean>

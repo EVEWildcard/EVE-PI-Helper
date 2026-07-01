@@ -42,7 +42,6 @@ export function installApi(): void {
     updatePISkills: async (id, skills) => { store.updatePISkills(id, skills); return true },
     setSkillOverrides: async (id, overrides) => store.setSkillOverrides(id, overrides),
     clearSkillOverrides: async (id) => store.clearSkillOverrides(id),
-    addPlanet: async (id, type) => store.addPlanet(id, type)!,
     removePlanet: async (id, planetId) => { store.removePlanet(id, planetId); return true },
     renamePlanet: async (id, planetId, name) => { store.renamePlanet(id, planetId, name); return true },
     setPlanetOutputs: async (id, planetId, typeIds) => { store.setPlanetOutputs(id, planetId, typeIds); return true },
