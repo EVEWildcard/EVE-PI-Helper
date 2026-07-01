@@ -18,8 +18,12 @@
 //   location.reload()
 
 import type { Planet, StoredCharacter } from '../../types/api'
+import { STORE_KEY } from '../../dev/devTools'
 
-const STORE_KEY = 'evepi.store'
+// Read from whatever store the reporter is actually looking at (real or the dev
+// sandbox), but always emit the replay map under the canonical key so a
+// maintainer can paste it back without needing `?dev`.
+const REPLAY_KEY = 'evepi.store'
 
 // UI/run-state keys we copy verbatim — none of these contain identifying data.
 const VERBATIM_KEYS = ['haulplan.step', 'setup.planetSort', 'chainView.suggestions', 'pi.notify.enabled']
@@ -97,7 +101,7 @@ export function buildSnapshot(): FeedbackSnapshot | null {
     nextPlanetId: store.nextPlanetId ?? (allPlanetIds.length ? Math.max(...allPlanetIds) + 1 : 1),
   }
 
-  const data: Record<string, string> = { [STORE_KEY]: JSON.stringify(sanitizedStore) }
+  const data: Record<string, string> = { [REPLAY_KEY]: JSON.stringify(sanitizedStore) }
 
   // Haul-plan run state — remap character ids inside the frozen order + checked set.
   const order = readJSON<number[]>('haulplan.order')
