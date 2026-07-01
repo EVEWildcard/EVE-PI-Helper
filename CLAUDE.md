@@ -15,10 +15,24 @@ The full cycle, run **without asking** once tests pass and the change is clean:
 2. Commit → push to that branch.
 3. Open a PR into `dev`: `gh pr create --base dev ...`.
 4. Merge it: `gh pr merge <n> --squash --delete-branch` (deletes the remote branch).
-5. **Promote to prod:** merge `dev` → `main` so it deploys — hands-off, don't wait for the user.
-   `gh pr create --base main --head dev ...` then `gh pr merge <n> --squash` (keep `dev`).
+5. **Promote to prod:** merge `dev` → `main` so it deploys. `gh pr create --base main --head dev ...`
+   then `gh pr merge <n> --squash` (keep `dev`). **Whether to promote hands-off vs. wait for the
+   user depends on the change — see the promotion policy below.**
 6. **Delete the local feature branch** after it's merged: `git branch -d <branch>`.
    Switch back to `dev` and `git pull` before starting the next thing.
+
+### Promotion policy: when to auto-promote `dev` → `main` vs. wait
+
+After merging into `dev`, decide based on the nature of the change:
+
+- **README / docs changes:** do **not** auto-promote. Tell the user to look at the preview env
+  (the `dev` deploy URL). If they like it, then promote to `main`.
+- **Code changes sized small / trivial / medium:** auto-promote to `main` hands-off, no need to ask.
+- **Everything else** (large, risky, user-facing behavior changes, anything you're unsure about):
+  do **not** promote silently. Either ask the user "auto-promote or check preview first?" or tell
+  them to verify in preview before you ship it.
+
+When in doubt, don't auto-promote — ask.
 
 Both `dev` and `main` track the same commits after promotion; `dev` gives a preview URL and a
 staging step, `main` is prod.

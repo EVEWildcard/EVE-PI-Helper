@@ -1,20 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
-import { PLANET_TYPES } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
 import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
 import styles from './SetupView.module.css'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtTrainingTime(finishDate: string): string {
-  const ms = Math.max(0, new Date(finishDate).getTime() - Date.now())
-  const d = Math.floor(ms / 86_400_000)
-  const h = Math.floor((ms % 86_400_000) / 3_600_000)
-  const m = Math.floor((ms % 3_600_000) / 60_000)
-  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
-}
 
 function fmtTrainingShort(finishDate: string): string {
   const ms = Math.max(0, new Date(finishDate).getTime() - Date.now())
@@ -238,7 +229,6 @@ interface CharCardProps {
   onSkillChange: (skills: PISkillLevels) => void
   onSkillOverride: (overrides: Partial<Record<keyof PISkillLevels, number>>) => void
   onClearOverrides: () => void
-  onAddPlanet: (type: string) => void
   onRenamePlanet: (planetId: number, name: string) => void
   planetSort: PlanetSort
   prices: Record<number, number>
@@ -291,7 +281,7 @@ function getGroupLabel(key: string, sort: PlanetSort): string {
   return key
 }
 
-function CharCard({ char, onRemove, onSkillChange, onSkillOverride, onClearOverrides, onAddPlanet, onRenamePlanet, planetSort, prices }: CharCardProps) {
+function CharCard({ char, onRemove, onSkillChange, onSkillOverride, onClearOverrides, onRenamePlanet, planetSort, prices }: CharCardProps) {
   const [skillsOpen, setSkillsOpen] = useState(false)
 
   const ov = char.skillOverrides ?? {}
@@ -463,39 +453,6 @@ function CharCard({ char, onRemove, onSkillChange, onSkillOverride, onClearOverr
   )
 }
 
-// ── Import from EVE modal ─────────────────────────────────────────────────────
-
-interface ImportModalProps {
-  onImport: (clientId: string) => void
-  onClose: () => void
-  importing: boolean
-  error: string | null
-}
-
-function ImportModal({ onImport, onClose, importing, error }: ImportModalProps) {
-  return (
-    <div className={styles.modalOverlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <h2 className={styles.modalTitle}>Import from EVE Online</h2>
-        <p className={styles.modalText}>
-          Your browser will open the EVE Online login page. Log in as the character you want to import — the app will read their planets and skills automatically.
-        </p>
-        {error && <div className={styles.modalError}>{error}</div>}
-        <div className={styles.modalActions}>
-          <button className={styles.modalCancel} onClick={onClose}>Cancel</button>
-          <button
-            className={styles.modalConfirm}
-            onClick={() => onImport('')}
-            disabled={importing}
-          >
-            {importing ? 'Waiting for login…' : 'Login with EVE →'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Workforce stats ───────────────────────────────────────────────────────────
 // Everything here is derived from the in-memory `characters` array — no backend.
 // "Effective" skills fold in locally-planned overrides, matching what the cards
@@ -561,6 +518,7 @@ interface CharStat {
   skillMaxed: boolean   // IC 5 + CCU 5 — the two skills that gate a running empire
   full6: boolean        // IC maxed (6 slots) AND all 6 planets deployed — fully built
   extractors: number
+  factories: number
   expiredCount: number
   idleCount: number
   iskPerHr: number      // running output only (active planets)
@@ -578,6 +536,7 @@ function computeCharStat(char: StoredCharacter, prices: Record<number, number>):
     skillMaxed: piEnabled && eff.interplanetaryConsolidation === 5 && eff.commandCenterUpgrades === 5,
     full6: maxPlanets >= 6 && planetsUsed >= 6,
     extractors: char.planets.filter(planetIsExtractor).length,
+    factories: char.planets.filter(p => !planetIsExtractor(p)).length,
     expiredCount: char.planets.filter(planetIsExpiredExtractor).length,
     idleCount: char.planets.filter(planetIsIdleFactory).length,
     iskPerHr: char.planets.reduce((sum, p) => sum + (planetIsActive(p) ? planetIskPerHr(p, prices) : 0), 0),
@@ -650,6 +609,7 @@ function WorkforceBar({ stats, filter, setFilter }: {
     const piToons = pi.length
     const expired = stats.reduce((a, s) => a + s.expiredCount, 0)
     const extractors = stats.reduce((a, s) => a + s.extractors, 0)
+    const factories = stats.reduce((a, s) => a + s.factories, 0)
     return {
       toons: stats.length,
       piToons,
@@ -659,8 +619,8 @@ function WorkforceBar({ stats, filter, setFilter }: {
       skillMaxedPct: piToons ? Math.round(100 * pi.filter(s => s.skillMaxed).length / piToons) : 0,
       full6Count: pi.filter(s => s.full6).length,
       extractors,
+      factories,
       expired,
-      expiredPct: extractors ? Math.round(100 * expired / extractors) : 0,
       noPlanets: stats.filter(s => s.noPlanets).length,
       idle: stats.reduce((a, s) => a + s.idleCount, 0),
       freeSlots: stats.reduce((a, s) => a + s.freeSlots, 0),
@@ -694,9 +654,14 @@ function WorkforceBar({ stats, filter, setFilter }: {
           <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.piToons ? Math.round(100 * agg.full6Count / agg.piToons) : 0}%`, background: 'var(--accent)' }} /></div>
         </div>
         <div className={styles.wfTile}>
-          <div className={styles.wfTileLabel}>Extractors expired</div>
-          <div className={styles.wfTileVal}>{agg.expired}<span className={styles.wfTileValSub}>/{agg.extractors}</span></div>
-          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.expiredPct}%`, background: 'var(--danger)' }} /></div>
+          <div className={styles.wfTileLabel}>Extractors</div>
+          <div className={styles.wfTileVal}>{agg.extractors}</div>
+          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.totalPlanets ? Math.round(100 * agg.extractors / agg.totalPlanets) : 0}%`, background: 'var(--accent)' }} /></div>
+        </div>
+        <div className={styles.wfTile}>
+          <div className={styles.wfTileLabel}>Factories</div>
+          <div className={styles.wfTileVal}>{agg.factories}</div>
+          <div className={styles.wfBar}><div className={styles.wfBarFill} style={{ width: `${agg.totalPlanets ? Math.round(100 * agg.factories / agg.totalPlanets) : 0}%`, background: 'var(--ok)' }} /></div>
         </div>
       </div>
 
@@ -738,13 +703,11 @@ interface Props {
   onSkillChange: (id: number, skills: PISkillLevels) => void
   onSkillOverride: (id: number, overrides: Partial<Record<keyof PISkillLevels, number>>) => void
   onClearOverrides: (id: number) => void
-  onAddPlanet: (characterId: number, type: string) => void
   onRenamePlanet: (characterId: number, planetId: number, name: string) => void
-  onDone: () => void
   prices: Record<number, number>
 }
 
-export function SetupView({ characters, onAddCharacter, onImportCharacter, onRemoveCharacter, onSkillChange, onSkillOverride, onClearOverrides, onAddPlanet, onRenamePlanet, onDone, prices }: Props) {
+export function SetupView({ characters, onAddCharacter, onImportCharacter, onRemoveCharacter, onSkillChange, onSkillOverride, onClearOverrides, onRenamePlanet, prices }: Props) {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const [planetSort, setPlanetSort] = useState<PlanetSort>(
@@ -870,7 +833,6 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
             onSkillChange={(skills) => onSkillChange(char.characterId, skills)}
             onSkillOverride={(overrides) => onSkillOverride(char.characterId, overrides)}
             onClearOverrides={() => onClearOverrides(char.characterId)}
-            onAddPlanet={(type) => onAddPlanet(char.characterId, type)}
             onRenamePlanet={(pid, name) => onRenamePlanet(char.characterId, pid, name)}
             planetSort={planetSort}
             prices={prices}
