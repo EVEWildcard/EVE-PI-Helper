@@ -41,7 +41,17 @@ times. Its only jobs: host the worktrees under `.claude/worktrees/` and `git pul
 5. **Promote to prod:** merge `dev` → `main` so it deploys. `gh pr create --base main --head dev ...`
    then `gh pr merge <n> --squash` (keep `dev`). **Whether to promote hands-off vs. wait for the
    user depends on the change — see the promotion policy below.**
-6. **Clean up:** from the main checkout,
+6. **Sync history right after promoting** (always, hands-off): from the main checkout on `dev`,
+
+   ```bash
+   git fetch origin && git merge origin/main -m "Merge main back into dev (history sync after squash promotions; content stays dev's)" && git push
+   ```
+
+   The squash-promote puts a new SHA on `main`, so the `main`/`dev` merge-base goes stale and
+   merge-base diffs (`git diff main...dev`, PR previews, the app's "local files modified" panel)
+   show a phantom diff even though content is identical. This merge is a content no-op that
+   moves the merge-base forward and clears it.
+7. **Clean up:** from the main checkout,
    `git worktree remove .claude/worktrees/<slug>` and `git branch -D <branch>` (`-D`, not
    `-d` — squash merges mean git can't see the branch as merged; confirm the PR merged
    first), then `git pull` on `dev`. (Harness-created worktrees clean themselves up via
@@ -64,8 +74,9 @@ When in doubt, don't auto-promote — ask.
 
 After a squash-promote, `dev` and `main` are **content-equal but not history-equal** — the
 squash creates a new commit on `main` with its own SHA, so the two branches diverge in history
-even though the working tree matches. That's expected. `dev` gives a preview URL and a staging
-step, `main` is prod.
+even though the working tree matches. Step 6 (merge `main` back into `dev`) re-syncs the
+history immediately so tooling doesn't show a phantom diff. `dev` gives a preview URL and a
+staging step, `main` is prod.
 
 ### Why worktrees (and what they don't fix)
 
