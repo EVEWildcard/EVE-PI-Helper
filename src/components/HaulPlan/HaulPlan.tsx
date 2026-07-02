@@ -93,6 +93,42 @@ function findReadyAt(characters: StoredCharacter[]): Date | null {
   return earliest
 }
 
+// Latest extractor program end still in the future — when the LAST extractor needs
+// resetting again, i.e. when the whole next haul run is due.
+function findNextRunAt(characters: StoredCharacter[], now: number): Date | null {
+  let latest: Date | null = null
+  for (const char of characters) {
+    for (const planet of char.planets) {
+      if (!isExtractorPlanet(planet) || !planet.expiryTime) continue
+      const d = new Date(planet.expiryTime)
+      if (d.getTime() <= now) continue
+      if (!latest || d > latest) latest = d
+    }
+  }
+  return latest
+}
+
+// ── run-complete confetti ─────────────────────────────────────────────────────
+
+const CONFETTI_COLORS = ['#4ab095', '#4a90c8', '#8060c0', '#c8a030', '#d07030', '#5cc4a8']
+
+interface ConfettiPiece {
+  left: number; color: string; dur: number; delay: number; sway: number; spin: number; w: number; h: number
+}
+
+function makeConfetti(count: number): ConfettiPiece[] {
+  return Array.from({ length: count }, () => ({
+    left: Math.random() * 100,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+    dur: 2.6 + Math.random() * 1.8,
+    delay: Math.random() * 0.9,
+    sway: -70 + Math.random() * 140,
+    spin: 360 + Math.random() * 900,
+    w: 6 + Math.random() * 5,
+    h: 9 + Math.random() * 6,
+  }))
+}
+
 // ── per-alt plan model ──────────────────────────────────────────────────────
 
 interface DeliverInput {
@@ -646,9 +682,6 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     touchActivity()
   }
 
-  if (characters.length === 0)
-    return <div className={styles.empty}>Add characters to see the hauling plan.</div>
-
   // Resets the player already did in-game (ESI sees the extractor running again) are
   // auto-verified (✓✓) — counted done without being manually checked, and never
   // removed from the plan.
@@ -662,6 +695,19 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   const allKeys = steps.flatMap(s => s.taskKeys)
   const doneItems = allKeys.filter(isDone).length
   const totalItems = allKeys.length
+
+  // ── run complete — celebrate, then count down to the next run ──
+  const runComplete = totalItems > 0 && doneItems === totalItems
+  // "Review steps" lets the player peek back at the finished plan from the
+  // celebration screen; cleared automatically when a new run starts.
+  const [reviewSteps, setReviewSteps] = useState(false)
+  useEffect(() => { if (!runComplete) setReviewSteps(false) }, [runComplete])
+  const nextRunAt = useMemo(() => findNextRunAt(characters, now), [characters, now])
+  // Stable piece set per celebration so re-renders (minute tick) don't restart the fall.
+  const confetti = useMemo(() => (runComplete ? makeConfetti(90) : []), [runComplete])
+
+  if (characters.length === 0)
+    return <div className={styles.empty}>Add characters to see the hauling plan.</div>
 
   const isOverdue = readyAt ? readyAt.getTime() <= now : false
   const step = steps[activeIdx]
@@ -744,6 +790,50 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
 
       {/* Active alt — full screen */}
       <div className={styles.stage}>
+        {runComplete && !reviewSteps ? (
+          <div className={styles.celebration}>
+            <div className={styles.confetti} aria-hidden="true">
+              {confetti.map((p, i) => (
+                <i
+                  key={i}
+                  className={styles.confettiPiece}
+                  style={{
+                    left: `${p.left}%`,
+                    background: p.color,
+                    width: p.w,
+                    height: p.h,
+                    '--dur': `${p.dur}s`,
+                    '--delay': `${p.delay}s`,
+                    '--sway': `${p.sway}px`,
+                    '--spin': `${p.spin}deg`,
+                  } as React.CSSProperties}
+                />
+              ))}
+            </div>
+            <span className={styles.celebrationEmoji}>🎉</span>
+            <h2 className={styles.celebrationTitle}>Run complete — nice work!</h2>
+            <p className={styles.celebrationSub}>
+              All {totalItems} tasks across {steps.length} logins are done.
+            </p>
+            {nextRunAt && (
+              <div className={styles.countdownCard}>
+                <span className={styles.countdownLabel}>Next run</span>
+                <span className={styles.countdownBig}>{formatReadyAt(nextRunAt, now)}</span>
+                <span className={styles.countdownNote}>
+                  when the last extractor program ends
+                  {readyAt && readyAt.getTime() > now && readyAt.getTime() !== nextRunAt.getTime()
+                    ? ` · first one expires ${formatReadyAt(readyAt, now)}`
+                    : ''}
+                </span>
+              </div>
+            )}
+            <div className={styles.celebrationActions}>
+              <button className={styles.navPrimary} onClick={resetRun}>Reset for next run ↺</button>
+              <button className={styles.linkBtn} onClick={() => setReviewSteps(true)}>Review steps</button>
+            </div>
+          </div>
+        ) : (
+        <>
         <div className={styles.altCard}>
           <div className={styles.altHeader}>
             {step.char.characterId > 0 && (
@@ -937,7 +1027,11 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
           <span className={styles.navHint}>
             {stepDone(step) ? 'All done on this alt' : `${step.taskKeys.filter(isDone).length}/${step.taskKeys.length} done`}
           </span>
-          {activeIdx < steps.length - 1 ? (
+          {runComplete ? (
+            <button className={styles.navPrimary} onClick={() => setReviewSteps(false)}>
+              Run complete 🎉
+            </button>
+          ) : activeIdx < steps.length - 1 ? (
             <button className={styles.navPrimary} onClick={() => completeAndNext(step)}>
               Complete &amp; next →
             </button>
@@ -947,6 +1041,8 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             </button>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   )
