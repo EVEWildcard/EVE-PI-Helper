@@ -1,30 +1,51 @@
 # CLAUDE.md — EVE PI Helper
 
-## Git workflow: GitHub Flow, one branch per session, base off `dev`
+## Git workflow: one worktree per session, base off `dev`
 
-**Every session works on its own feature branch — never commit directly to `dev` or `main`.**
+**Every session works in its own git worktree with its own branch — never edit, commit, or
+switch branches in the main checkout.**
 **Base branch is always `dev`, not `main`.** `main` is production (Vercel auto-deploys it).
 
-At the start of a session, if you're on `dev`/`main`, create a feature branch off `dev` before
-making changes (e.g. `feat/haul-plan-stages`, `fix/chain-arrow-counts`). If the session already
-starts on a feature branch, keep using it. Do all commits for the session's work on that branch.
+The main checkout (`C:\Users\Luciano Donati\EVE PI`) stays parked on `dev`, clean, at all
+times. Its only jobs: host the worktrees under `.claude/worktrees/` and `git pull` the latest
+`dev`. If you find uncommitted changes there, they belong to another session — leave them alone.
 
-The full cycle, run **without asking** once tests pass and the change is clean:
+### Session start
 
-1. Branch off `dev` (once per session, if not already on a feature branch).
-2. Commit → push to that branch.
-3. **Sync onto latest `dev` before opening the PR** (avoids collisions with sessions that
-   merged while yours was open): `git fetch origin && git rebase origin/dev`. Resolve any
-   conflicts now — while you still have the context — not at merge time. Then force-push the
-   branch (`git push --force-with-lease`). If the branch is long-lived or the rebase is messy,
-   prefer `git merge origin/dev` instead of rebase.
-4. Open a PR into `dev`: `gh pr create --base dev ...`.
-5. Merge it: `gh pr merge <n> --squash --delete-branch` (deletes the remote branch).
-6. **Promote to prod:** merge `dev` → `main` so it deploys. `gh pr create --base main --head dev ...`
+- **Already inside a worktree** (cwd under `.claude/worktrees/`)? Keep using it.
+- **In the main checkout?** Create a worktree before touching any file. Prefer the harness's
+  worktree isolation (EnterWorktree / `isolation: "worktree"`) if available; otherwise:
+
+  ```bash
+  git fetch origin
+  git worktree add .claude/worktrees/<slug> -b <type>/<slug> origin/dev
+  ```
+
+  (`<type>/<slug>` like `feat/haul-plan-stages`, `fix/chain-arrow-counts`.) Then do **all**
+  work inside that directory.
+- A fresh worktree has no `node_modules` — run `npm install` there before typecheck/tests/dev
+  server. `.claude/worktrees/` is gitignored, so worktrees never show up as untracked files.
+
+### The full cycle, run **without asking** once tests pass and the change is clean
+
+1. Commit in the worktree → push: `git push -u origin <branch>`.
+2. **Sync onto latest `dev` before opening the PR** (another session may have merged while
+   yours was open): `git fetch origin && git rebase origin/dev`. Resolve any conflicts now —
+   while you still have the context — not at merge time. Then force-push
+   (`git push --force-with-lease`). If the rebase is messy, prefer `git merge origin/dev`.
+3. Open a PR into `dev`: `gh pr create --base dev ...`.
+4. Merge it: `gh pr merge <n> --squash`. **Don't use `--delete-branch` from inside a
+   worktree** — after merging, gh tries to check out `dev` locally, which fails
+   (`'dev' is already used by worktree ...`) and aborts before deleting the remote branch.
+   Instead delete it explicitly: `git push origin --delete <branch>`.
+5. **Promote to prod:** merge `dev` → `main` so it deploys. `gh pr create --base main --head dev ...`
    then `gh pr merge <n> --squash` (keep `dev`). **Whether to promote hands-off vs. wait for the
    user depends on the change — see the promotion policy below.**
-7. **Delete the local feature branch** after it's merged: `git branch -d <branch>`.
-   Switch back to `dev` and `git pull` before starting the next thing.
+6. **Clean up:** from the main checkout,
+   `git worktree remove .claude/worktrees/<slug>` and `git branch -d <branch>`, then
+   `git pull` on `dev`. (Harness-created worktrees clean themselves up via ExitWorktree.)
+   If a stale worktree blocks removal, `git worktree remove --force` only after confirming
+   its branch was merged.
 
 ### Promotion policy: when to auto-promote `dev` → `main` vs. wait
 
@@ -44,17 +65,21 @@ squash creates a new commit on `main` with its own SHA, so the two branches dive
 even though the working tree matches. That's expected. `dev` gives a preview URL and a staging
 step, `main` is prod.
 
-### Why sessions collide (and how the steps above prevent it)
+### Why worktrees (and what they don't fix)
 
-Branch-per-session stops sessions from *overwriting* each other; it does **not** stop *conflicts*.
-Two things cause collisions:
+The old branch-per-session flow shared one working directory: concurrent sessions stepped on
+each other's uncommitted files, and a `git checkout` in one session yanked the branch out from
+under another. Worktrees remove that whole class of failure — each session gets its own
+directory + branch, fully isolated until merge time.
 
-- **Stale base:** every session branches off `dev` as it starts. If another session merges first,
-  `dev` moves ahead and your branch is now based on an old `dev`. Step 3 (rebase/merge onto latest
-  `dev` before the PR) resolves this while you still have context.
+What worktrees do **not** fix:
+
+- **Stale base:** every worktree is cut from `dev` as it starts. If another session merges
+  first, yours is based on an old `dev`. Step 2 (rebase/merge onto latest `dev` before the PR)
+  resolves this while you still have context.
 - **Overlapping edits:** two sessions editing the same lines of the same file will conflict no
-  matter how clean the branching is — that's inherent to parallel work. Keep branches short-lived
-  and file-scoped; don't run concurrent sessions that touch the same files.
+  matter how isolated the working trees are — that's inherent to parallel work. Keep sessions
+  short-lived and file-scoped; don't run concurrent sessions that touch the same files.
 
 **`gh` isn't on PATH/authed here.** Call `"/c/Program Files/GitHub CLI/gh.exe"` from the **Bash
 tool** with a token from the git credential helper:
