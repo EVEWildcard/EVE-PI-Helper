@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
-import { PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
+import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
+import { planetOutputRate } from '../ChainView/chainModel'
 import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
 import styles from './SetupView.module.css'
 
@@ -493,18 +494,15 @@ function planetIsIdleFactory(planet: Planet): boolean {
   return !planetIsExtractor(planet) && (planet.factoryCount ?? 0) > 0 && (planet.outputs?.length ?? 0) === 0
 }
 
-// units/hr per factory = (output.quantity / cycleTime) * 3600; factoryCount split evenly across outputs.
+// Schematic rate × facilities, extraction-capped where measured — shared with
+// the chain model (planetOutputRate) so Setup and Chain tell the same story.
 function planetIskPerHr(planet: Planet, prices: Record<number, number>): number {
   const outs = planet.outputs ?? []
   if (outs.length === 0) return 0
   return outs.reduce((sum, tid) => {
     const price = prices[tid]
     if (!price) return sum
-    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
-    if (!sch) return sum
-    const factoriesForThis = Math.max(1, Math.floor((planet.factoryCount ?? 1) / outs.length))
-    const unitsPerHr = (sch.output.quantity / sch.cycleTime) * 3600 * factoriesForThis
-    return sum + unitsPerHr * price
+    return sum + planetOutputRate(planet, tid) * price
   }, 0)
 }
 
@@ -764,51 +762,38 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
           <h1 className={styles.title}>Setup</h1>
           <span className={styles.subtitle}>Add characters, assign planets, pick what each one produces</span>
         </div>
-        <div className={styles.planetSortBar}>
-          {DEV_TOOLS && (
-            <>
-              <span
-                className={styles.planetSortLabel}
-                title={`Dev: seed ONE empire of N accounts (each runs all ${ALTS_PER_ACCOUNT} alts). The more accounts, the likelier each alt is maxed; at ${MAX_ACCOUNTS} accounts every alt is maxed (the supported ceiling). The first alt of the first account is always maxed.`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                Scale
-                <input
-                  type="range"
-                  min={1}
-                  max={MAX_ACCOUNTS}
-                  value={seedAccounts}
-                  onChange={(e) => setSeedAccounts(Number(e.target.value))}
-                  onPointerUp={commitSeed}
-                  onKeyUp={(e) => { if (e.key !== 'Tab') commitSeed() }}
-                  style={{ width: 150, verticalAlign: 'middle' }}
-                />
-                {/* Fixed width so the readout never reflows the slider while dragging. */}
-                <span style={{ display: 'inline-block', width: 64, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
-                  {seedAccounts} acct{seedAccounts === 1 ? '' : 's'}
-                </span>
-              </span>
-              <button
-                className={styles.planetSortBtn}
-                title="Dev only: wipe all characters"
-                onClick={() => { localStorage.setItem('evepi.dev.seeded', '1'); clearTestData(); window.location.reload() }}
-              >
-                Clear
-              </button>
-              <span className={styles.planetSortLabel} style={{ marginLeft: 8 }}>Sort planets</span>
-            </>
-          )}
-          {!DEV_TOOLS && <span className={styles.planetSortLabel}>Sort planets</span>}
-          {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
-            <button
-              key={opt}
-              className={`${styles.planetSortBtn} ${planetSort === opt ? styles.planetSortBtnActive : ''}`}
-              onClick={() => { setPlanetSort(opt); localStorage.setItem('setup.planetSort', opt) }}
+        {DEV_TOOLS && (
+          <div className={styles.planetSortBar}>
+            <span
+              className={styles.planetSortLabel}
+              title={`Dev: seed ONE empire of N accounts (each runs all ${ALTS_PER_ACCOUNT} alts). The more accounts, the likelier each alt is maxed; at ${MAX_ACCOUNTS} accounts every alt is maxed (the supported ceiling). The first alt of the first account is always maxed.`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              {opt === 'name' ? 'Name' : opt === 'tier' ? 'Tier' : 'Expiry'}
+              Scale
+              <input
+                type="range"
+                min={1}
+                max={MAX_ACCOUNTS}
+                value={seedAccounts}
+                onChange={(e) => setSeedAccounts(Number(e.target.value))}
+                onPointerUp={commitSeed}
+                onKeyUp={(e) => { if (e.key !== 'Tab') commitSeed() }}
+                style={{ width: 150, verticalAlign: 'middle' }}
+              />
+              {/* Fixed width so the readout never reflows the slider while dragging. */}
+              <span style={{ display: 'inline-block', width: 64, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+                {seedAccounts} acct{seedAccounts === 1 ? '' : 's'}
+              </span>
+            </span>
+            <button
+              className={styles.planetSortBtn}
+              title="Dev only: wipe all characters"
+              onClick={() => { localStorage.setItem('evepi.dev.seeded', '1'); clearTestData(); window.location.reload() }}
+            >
+              Clear
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {characters.length > 0 && (
@@ -824,6 +809,21 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
           )}
         </div>
       ) : (
+      <div className={styles.cardsArea}>
+        {characters.length > 0 && (
+          <div className={styles.cardsToolbar}>
+            <span className={styles.planetSortLabel}>Sort planets</span>
+            {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
+              <button
+                key={opt}
+                className={`${styles.planetSortBtn} ${planetSort === opt ? styles.planetSortBtnActive : ''}`}
+                onClick={() => { setPlanetSort(opt); localStorage.setItem('setup.planetSort', opt) }}
+              >
+                {opt === 'name' ? 'Name' : opt === 'tier' ? 'Tier' : 'Expiry'}
+              </button>
+            ))}
+          </div>
+        )}
       <div className={styles.cards}>
         {visibleStats.map(({ char }) => (
           <CharCard
@@ -862,6 +862,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
             </>
           )}
         </div>
+      </div>
       </div>
       )}
     </div>

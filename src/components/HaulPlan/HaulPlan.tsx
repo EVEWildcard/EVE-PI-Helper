@@ -28,15 +28,6 @@ function formatSplit(splits: { name: string; share: number }[]): string {
   return splits.map(word).join(' · ')
 }
 
-/** Phrase a receiving alt's share of a split deposit, for the "grab your half"
- *  pickup reminder. Even 2-/3-way splits read naturally; anything else falls back
- *  to an approximate percentage. */
-function grabSharePhrase(share: number, parts: number): string {
-  if (parts === 2 && Math.abs(share - 0.5) < 0.02) return 'grab your half'
-  if (parts === 3 && Math.abs(share - 1 / 3) < 0.02) return 'grab your third'
-  return `grab your share (~${Math.round(share * 100)}%)`
-}
-
 /** How much of `material` a character consumes per cycle across all its factories. */
 function materialDemand(char: StoredCharacter, material: string): number {
   let q = 0
@@ -136,7 +127,7 @@ export interface AltStep {
   taskKeys: string[]
 }
 
-function resetKey(p: Planet): string { return `reset|${p.planetId}` }
+export function resetKey(p: Planet): string { return `reset|${p.planetId}` }
 function deliverKey(p: Planet, material: string): string { return `deliver|${p.planetId}|${material}` }
 function depositKey(charId: number, material: string): string { return `deposit|${charId}|${material}` }
 
@@ -411,9 +402,10 @@ function SectionHeader({ kind, label, done, total, expanded, onToggle, onComplet
 
 // ── persistence ──────────────────────────────────────────────────────────────
 
-const STORAGE_KEY_CHECKED = 'haulplan.checked'
-const STORAGE_KEY_STEP    = 'haulplan.step'
-const STORAGE_KEY_ORDER   = 'haulplan.order'
+const STORAGE_KEY_CHECKED  = 'haulplan.checked'
+const STORAGE_KEY_STEP     = 'haulplan.step'
+const STORAGE_KEY_ORDER    = 'haulplan.order'
+const STORAGE_KEY_ACTIVITY = 'haulplan.lastActivity'
 
 function loadChecked(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY_CHECKED) ?? '[]')) }
@@ -425,6 +417,43 @@ function saveChecked(s: Set<string>) {
 function loadOrder(): number[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ORDER) ?? '[]') }
   catch { return [] }
+}
+function loadLastActivity(): number | null {
+  const v = parseInt(localStorage.getItem(STORAGE_KEY_ACTIVITY) ?? '', 10)
+  return Number.isFinite(v) ? v : null
+}
+function touchActivity() {
+  localStorage.setItem(STORAGE_KEY_ACTIVITY, String(Date.now()))
+}
+
+// ── new-run detection ────────────────────────────────────────────────────────
+// A player coming back for the next haul run shouldn't land on last run's
+// half-checked plan. A saved run counts as stale when it hasn't been touched in
+// RUN_STALE_MS, or — for shorter cycles — when an extractor that was ticked as
+// reset during that run has expired again (a full extraction cycle has passed).
+// The cycle signal needs CYCLE_IDLE_MS of inactivity first: ESI lags a few
+// minutes behind an in-game reset, so mid-run a manually ticked extractor can
+// briefly look "still expired" and must not wipe an active run.
+
+const RUN_STALE_MS  = 12 * 3600_000
+const CYCLE_IDLE_MS = 3600_000
+
+export function isRunStale(
+  checked: Set<string>,
+  activeStep: number,
+  lastActivity: number | null,
+  characters: StoredCharacter[],
+  now: number,
+): boolean {
+  const hasProgress = checked.size > 0 || activeStep > 0
+  if (!hasProgress || lastActivity == null) return false
+  const idle = now - lastActivity
+  if (idle > RUN_STALE_MS) return true
+  if (idle <= CYCLE_IDLE_MS) return false
+  return characters.some(c => c.planets.some(p =>
+    isExtractorPlanet(p) &&
+    checked.has(resetKey(p)) &&
+    !!p.expiryTime && new Date(p.expiryTime).getTime() <= now))
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -502,6 +531,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     return Number.isFinite(v) ? v : 0
   })
 
+  // Coming back for another haul run? Runs on mount and on the minute tick (so a
+  // permanently open tab also resets), and starts a fresh run at the first step
+  // when the saved one is stale. A missing activity timestamp (pre-feature saves)
+  // is seeded rather than treated as stale, so a deploy can't wipe an active run.
+  useEffect(() => {
+    if (characters.length === 0) return
+    if (loadLastActivity() == null) { touchActivity(); return }
+    if (isRunStale(checked, active, loadLastActivity(), characters, now)) resetRun()
+  }, [now, characters]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const activeIdx = Math.min(active, Math.max(0, steps.length - 1))
   useEffect(() => { localStorage.setItem(STORAGE_KEY_STEP, String(activeIdx)) }, [activeIdx])
 
@@ -524,7 +563,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   useEffect(() => {
     if (!focusNonce) return
     const idx = steps.findIndex(s => s.resets.some(r => r.urgency === 'expired'))
-    if (idx >= 0) setActive(idx)
+    if (idx >= 0) goTo(idx)
     setPulsing(true)
     const t = setTimeout(() => setPulsing(false), 2400)
     return () => clearTimeout(t)
@@ -553,6 +592,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   }, [steps, now])
 
   function toggle(key: string) {
+    touchActivity()
     setChecked(prev => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
@@ -563,6 +603,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
 
   // Tick every sub-item in a section in one click ("Complete all").
   function checkAll(keys: string[]) {
+    touchActivity()
     setChecked(prev => {
       const next = new Set(prev)
       for (const k of keys) next.add(k)
@@ -572,6 +613,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
   }
 
   function completeAndNext(step: AltStep) {
+    touchActivity()
     setChecked(prev => {
       const next = new Set(prev)
       for (const k of step.taskKeys) next.add(k)
@@ -581,7 +623,13 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     setActive(i => Math.min(steps.length - 1, i + 1))
   }
 
-  function clearAll() {
+  // User navigation between alts counts as run activity.
+  function goTo(i: number) {
+    touchActivity()
+    setActive(i)
+  }
+
+  function resetRun() {
     const empty = new Set<string>()
     setChecked(empty)
     saveChecked(empty)
@@ -589,6 +637,8 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
     const fresh = deriveLoginOrder(characters, Date.now())
     setFrozenOrder(fresh)
     localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(fresh))
+    setActive(0)
+    touchActivity()
   }
 
   if (characters.length === 0)
@@ -640,7 +690,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
           )}
           <div className={styles.topBarActions}>
             <span className={styles.progressLabel}>{doneItems}/{totalItems}</span>
-            {doneItems > 0 && <button className={styles.clearBtn} onClick={clearAll}>Reset run</button>}
+            {doneItems > 0 && <button className={styles.clearBtn} onClick={resetRun}>Reset run</button>}
           </div>
         </div>
         <div className={styles.progressBar}>
@@ -659,7 +709,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
               {i > 0 && <span className={styles.stepArrow} aria-hidden="true">→</span>}
               <button
                 className={`${styles.step} ${i === activeIdx ? styles.stepActive : ''} ${done ? styles.stepDone : ''} ${s.isReturn ? styles.stepReturn : ''}`}
-                onClick={() => setActive(i)}
+                onClick={() => goTo(i)}
               >
                 <span className={styles.stepCircleWrap}>
                   <span className={styles.stepCircle}>
@@ -807,8 +857,6 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       {inputs.map(inp => {
                         const key = deliverKey(stop.planet, inp.material)
                         const done = isDone(key)
-                        const splitMap = inp.ready && !inp.self ? splitShareByMaterial.get(inp.material) : undefined
-                        const myShare = splitMap?.get(step.char.characterName)
                         return (
                           <label
                             key={inp.material}
@@ -824,9 +872,6 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                               ) : inp.ready ? (
                                 <span className={styles.sourceNote}>
                                   pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}
-                                  {myShare != null && (
-                                    <span className={styles.splitGrab}> · {grabSharePhrase(myShare, splitMap!.size)}</span>
-                                  )}
                                 </span>
                               ) : (
                                 <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
@@ -881,7 +926,7 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
 
         {/* Nav */}
         <div className={styles.nav}>
-          <button className={styles.navBtn} disabled={activeIdx === 0} onClick={() => setActive(i => Math.max(0, i - 1))}>
+          <button className={styles.navBtn} disabled={activeIdx === 0} onClick={() => goTo(Math.max(0, activeIdx - 1))}>
             ← Prev
           </button>
           <span className={styles.navHint}>

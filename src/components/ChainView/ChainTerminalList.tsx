@@ -14,10 +14,16 @@ function formatIsk(isk: number): string {
 
 type Health = 'broken' | 'bottleneck' | 'ok' | 'noprice'
 
+// Buffer-fed PI normally runs below 100% of factory nameplate (planets are the
+// supply quantum; factories idle for free), so mild throttling is still 'ok' —
+// the row shows the % without raising an alarm. Only genuinely low coverage
+// gets the bottleneck treatment.
+const BOTTLENECK_BELOW = 0.8
+
 function healthOf(t: TerminalChain): Health {
   if (t.price <= 0) return 'noprice'
   if (t.broken) return 'broken'
-  if (t.realizedFraction < 0.999) return 'bottleneck'
+  if (t.realizedFraction < BOTTLENECK_BELOW) return 'bottleneck'
   return 'ok'
 }
 
@@ -54,7 +60,7 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
         {terminals.length > 0 && terminals.length <= 4 && (
           <div className={styles.teach}>
             <p>Each row is a <strong>chain</strong> — an end product you sell — ranked by ISK/hr.</p>
-            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> at full. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an input can’t keep up — the % is how much of full speed you’re running. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it. <span className={styles.teachDot} style={{ background: '#8a93a8' }} /> <strong>Imports</strong>: inputs you buy or haul in rather than produce — assumed available, so the chain still runs.</p>
+            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> — a % under 100 is your steady-state ceiling, and that’s normal: PI planets rarely balance 1:1, factories just idle for free between hauls. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an upstream supply covers under {Math.round(BOTTLENECK_BELOW * 100)}% of what your factories could run — worth a look. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it. <span className={styles.teachDot} style={{ background: '#8a93a8' }} /> <strong>Imports</strong>: inputs you buy or haul in rather than produce — assumed available, so the chain still runs.</p>
             <p>Click a chain to open just its graph; <strong>See everything</strong> shows the whole empire.</p>
           </div>
         )}
@@ -89,12 +95,15 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
                   </span>
                 )}
                 {health === 'bottleneck' && (
-                  <span className={`${styles.pill} ${styles.pillBottleneck}`} title={`Throughput limited by ${t.bottleneck?.name ?? 'an input'}`}>
+                  <span className={`${styles.pill} ${styles.pillBottleneck}`} title={`Throughput limited by ${t.bottleneck?.name ?? 'an input'} — supply comes in whole planets, so +1 producer planet is the lever`}>
                     ⛓ Bottleneck{t.bottleneck ? `: ${t.bottleneck.name}` : ''} · {pct}%
                   </span>
                 )}
                 {health === 'ok' && (
-                  <span className={`${styles.pill} ${styles.pillOk}`}>✓ Running</span>
+                  <span className={`${styles.pill} ${styles.pillOk}`}
+                    title={t.realizedFraction < 0.999 ? 'Running below factory nameplate — normal for buffer-fed PI; factories idle for free' : undefined}>
+                    ✓ Running{t.realizedFraction < 0.999 ? ` @ ${pct}%` : ''}
+                  </span>
                 )}
                 {health === 'noprice' && (
                   <span className={`${styles.pill} ${styles.pillMuted}`}>no market price</span>

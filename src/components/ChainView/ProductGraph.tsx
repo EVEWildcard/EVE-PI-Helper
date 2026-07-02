@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useRef, useState, useMemo, useEffect } from 're
 import type { StoredCharacter } from '../../types/api'
 import type { PITier } from '../../data/schematics'
 import { TIER_COLOR } from '../../data/tierColors'
-import { buildChainModel, type ProductFlow, type ProductStatus } from './chainModel'
+import { buildChainModel, COVERAGE_ISSUE_THRESHOLD, type ProductFlow, type ProductStatus } from './chainModel'
 import { buildProductGraph } from './productModel'
 import {
   NODE_W,
@@ -16,23 +16,49 @@ import styles from './ChainView.module.css'
 const COL_LABELS = ['P1 — Refined', 'P2 — Processed', 'P3 — Specialized', 'P4 — Advanced']
 
 // Status → accent color. The product node's border/stripe carry it so a problem
-// reads at a glance without a side panel: red = short, amber = overproduced.
+// reads at a glance without a side panel. Under-coverage is graded, not binary:
+// buffer-fed PI normally runs factories oversized vs. sustained supply, so a
+// mild gap is quiet — only genuinely low coverage turns amber/red, and only on
+// the ROOT product (downstream nodes point at the root instead of also flaring).
 const STATUS_COLOR: Record<ProductStatus, string> = {
-  bottleneck: '#d65a5a',
-  missing:    '#d65a5a',
-  excess:     '#c8923c',
-  terminal:   '#4ab095',
-  ok:         '#5a8fb0',
-  imported:   '#6b7488',
+  constrained: '#c8923c',   // baseline; accentFor() grades it by coverage
+  limited:     '#5a8fb0',   // quiet — the root carries the alarm
+  missing:     '#d65a5a',
+  excess:      '#c8923c',
+  terminal:    '#4ab095',
+  ok:          '#5a8fb0',
+  imported:    '#6b7488',
 }
 
-// Only the actionable states get a word. Everything healthy stays quiet — the
+const SEVERE = '#d65a5a'
+const MILD = '#c8923c'
+
+/** Coverage of downstream demand this node's supply can sustain. */
+function coverageOf(flow: ProductFlow): number {
+  return flow.demand > 0 ? flow.supply / flow.demand : 1
+}
+
+// A root supply limit is graded by how much of demand it covers; everything
+// else keeps its flat status color.
+function accentFor(flow: ProductFlow): string {
+  if (flow.status === 'constrained') {
+    const c = coverageOf(flow)
+    return c < 0.5 ? SEVERE : c < COVERAGE_ISSUE_THRESHOLD ? MILD : STATUS_COLOR.ok
+  }
+  return STATUS_COLOR[flow.status]
+}
+
+// Only the informative states get a word. Everything healthy stays quiet — the
 // accent color is enough; a wall of "BALANCED" is just noise. ("If something's
 // wrong tell me, otherwise we're good.")
-const STATUS_LABEL: Partial<Record<ProductStatus, string>> = {
-  bottleneck: 'short',
-  missing:    'missing',
-  excess:     'overproduced',
+function labelFor(flow: ProductFlow): string | null {
+  switch (flow.status) {
+    case 'constrained': return `covers ${Math.round(coverageOf(flow) * 100)}%`
+    case 'limited':     return flow.limitedBy ? `⛓ ${flow.limitedBy}` : null
+    case 'missing':     return 'missing'
+    case 'excess':      return 'overproduced'
+    default:            return null
+  }
 }
 
 interface Props {
@@ -159,16 +185,17 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
 
   const activeCols = ([0, 1, 2, 3] as const).filter(i => nodes.some(n => n.column === i))
 
-  // Overview stats for the legend.
+  // Overview stats for the legend. Only ROOT supply limits below the Issue
+  // threshold count — 'limited' nodes are symptoms of a root, not extra problems.
   const stats = (() => {
     let planets = 0
     for (const c of characters) planets += c.planets.length
-    let bottlenecks = 0, excess = 0
+    let supplyLimits = 0, excess = 0
     for (const f of flowByKey.values()) {
-      if (f.status === 'bottleneck' || f.status === 'missing') bottlenecks++
+      if (f.status === 'missing' || (f.status === 'constrained' && coverageOf(f) < COVERAGE_ISSUE_THRESHOLD)) supplyLimits++
       else if (f.status === 'excess') excess++
     }
-    return { planets, products: nodes.length, bottlenecks, excess, alts: characters.filter(c => c.planets.length > 0).length }
+    return { planets, products: nodes.length, supplyLimits, excess, alts: characters.filter(c => c.planets.length > 0).length }
   })()
 
   return (
@@ -270,12 +297,13 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
             <div className={styles.legendStats}>
               <div className={styles.legendStatBig}>{stats.alts} alts · {stats.planets} planets</div>
               <div>{stats.products} products in the chain</div>
-              {stats.bottlenecks > 0 && (
-                <div style={{ color: STATUS_COLOR.bottleneck }}>{stats.bottlenecks} short · need more supply</div>
+              {stats.supplyLimits > 0 && (
+                <div style={{ color: MILD }}>{stats.supplyLimits} supply limit{stats.supplyLimits !== 1 ? 's' : ''} · ⛓ points at the root</div>
               )}
               {stats.excess > 0 && (
                 <div style={{ color: STATUS_COLOR.excess }}>{stats.excess} overproduced</div>
               )}
+              <div className={styles.legendHint}>coverage under 100% is normal — factories idle for free</div>
               <div className={styles.legendHint}>one card per product · hover to trace a chain</div>
             </div>
           </div>
@@ -300,14 +328,22 @@ interface ProductNodeProps {
 
 const ProductNode = React.forwardRef<HTMLDivElement, ProductNodeProps>(
   function ProductNode({ node, flow, count, x, y, hovered, dimmed, onHover }, ref) {
-    const accent = STATUS_COLOR[flow.status]
+    const accent = accentFor(flow)
     const tierColor = TIER_COLOR[flow.tier]
     // Supply/demand fill: how much of demand is covered (capped visual at 100%).
     const coverage = flow.demand > 0 ? Math.min(1, flow.supply / flow.demand) : 1
     const showBar = flow.demand > 0
-    const title = flow.demand > 0
-      ? `${flow.name}: producing ${fmtRate(flow.supply)}/h, ${fmtRate(flow.demand)}/h needed downstream`
-      : `${flow.name}: end product — ${fmtRate(flow.supply)}/h produced (nothing else you make consumes it)`
+    const pct = Math.round(coverageOf(flow) * 100)
+    const realizedPct = Math.round(flow.realizedFraction * 100)
+    const title = (() => {
+      if (flow.status === 'constrained')
+        return `${flow.name}: your planets make ${fmtRate(flow.supply)}/h; downstream factories could burn ${fmtRate(flow.demand)}/h at full duty (${pct}% covered). That gap is normal in buffer-fed PI — factories idle for free — but it is the chain's throughput ceiling. Supply only comes in whole planets: +1 ${flow.name} planet is the only real lever.`
+      if (flow.status === 'limited' && flow.limitedBy)
+        return `${flow.name}: throughput capped at ~${realizedPct}% by ${flow.limitedBy} upstream — fix starts there, not here.`
+      if (flow.demand > 0)
+        return `${flow.name}: producing ${fmtRate(flow.supply)}/h, ${fmtRate(flow.demand)}/h needed downstream`
+      return `${flow.name}: end product — ${fmtRate(flow.supply)}/h produced (nothing else you make consumes it)${flow.realizedFraction < 0.999 ? `; runs at ~${realizedPct}% of that${flow.limitedBy ? `, limited by ${flow.limitedBy}` : ''}` : ''}`
+    })()
 
     return (
       <div ref={ref}
@@ -327,8 +363,11 @@ const ProductNode = React.forwardRef<HTMLDivElement, ProductNodeProps>(
           {count > 0 && <span className={styles.prodCount}>×{count}</span>}
         </div>
         <div className={styles.prodStats}>
-          {STATUS_LABEL[flow.status] && (
-            <span className={styles.prodStatus} style={{ color: accent }}>{STATUS_LABEL[flow.status]}</span>
+          {labelFor(flow) && (
+            <span className={styles.prodStatus} style={{ color: accent }}>{labelFor(flow)}</span>
+          )}
+          {flow.status === 'terminal' && flow.realizedFraction < 0.999 && (
+            <span className={styles.prodStatus} style={{ color: STATUS_COLOR.imported }}>@ {realizedPct}%</span>
           )}
           {flow.status !== 'imported' && (
             <span className={styles.prodRate}>

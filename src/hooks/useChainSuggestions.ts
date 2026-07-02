@@ -6,6 +6,7 @@ import {
 } from '../data/schematics'
 import type { PIProduct, PISchematic } from '../data/schematics'
 import { P1_TO_PLANET_CATEGORIES, P1_TO_P0, CATEGORY_COMMAND_CENTER } from '../data/planetResources'
+import type { BalanceHint } from '../components/ChainView/chainModel'
 import type { SystemPlanetsMap } from './useSystemPlanets'
 
 export type SuggestionInputStatus = 'available' | 'needsFactory' | 'needsExtractor' | 'unavailable'
@@ -621,62 +622,9 @@ export function useChainSuggestions(
 export { formatTrainTime }
 
 // ── Balance hints ─────────────────────────────────────────────────────────────
-
-export interface BalanceHint {
-  type: 'bottleneck' | 'excess'
-  productName: string
-  producers: number   // planets producing this
-  consumers: number   // planets consuming this as input
-}
-
-// Pure core, extracted for unit testing (see `computeChainSuggestions`).
-export function computeBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
-    if (characters.length === 0) return []
-
-    // Count how many planets produce each product
-    const producerCount = new Map<string, number>()
-    // Count how many planets consume each product as a schematic input
-    const consumerCount = new Map<string, number>()
-
-    for (const char of characters) {
-      for (const planet of char.planets) {
-        const outputs = planet.outputNames ?? []
-        for (const name of outputs) {
-          if (!name) continue
-          producerCount.set(name, (producerCount.get(name) ?? 0) + 1)
-          // Infer inputs from this planet's outputs via schematics
-          for (const inputName of SCHEMATIC_INPUTS_BY_NAME.get(name) ?? []) {
-            consumerCount.set(inputName, (consumerCount.get(inputName) ?? 0) + 1)
-          }
-        }
-      }
-    }
-
-    const hints: BalanceHint[] = []
-
-    for (const [name, producers] of producerCount) {
-      const consumers = consumerCount.get(name) ?? 0
-      if (consumers === 0) continue  // end product sold directly — not an imbalance
-
-      if (consumers > producers) {
-        hints.push({ type: 'bottleneck', productName: name, producers, consumers })
-      } else if (producers > consumers) {
-        hints.push({ type: 'excess', productName: name, producers, consumers })
-      }
-    }
-
-    // Bottlenecks (shortfalls) cost you money and come first; excess can at worst
-    // be sold, so it's the lesser evil. Within each group, the most extreme
-    // imbalance surfaces first.
-    return hints.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'bottleneck' ? -1 : 1
-      return Math.abs(b.consumers - b.producers) - Math.abs(a.consumers - a.producers)
-    })
-}
-
-export function useBalanceHints(characters: StoredCharacter[]): BalanceHint[] {
-  return useMemo(() => computeBalanceHints(characters), [characters])
-}
+// The hints themselves now come from the flow model (rates, not planet counts):
+// see computeBalanceHints in ../components/ChainView/chainModel. Only the fix-
+// plan builder for a bottleneck hint lives here.
 
 // ── Shortfall fix plan ────────────────────────────────────────────────────────
 // One-off plan for a bottleneck balance hint: add one MORE producer of the short

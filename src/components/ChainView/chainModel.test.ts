@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { Planet, StoredCharacter } from '../../types/api'
 import { DEFAULT_PI_SKILLS } from '../../types/api'
-import { PRODUCT_BY_NAME } from '../../data/schematics'
-import { buildChainModel, planetKey } from './chainModel'
+import { PRODUCT_BY_NAME, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
+import { buildChainModel, computeBalanceHints, planetKey } from './chainModel'
 import { filterToChain } from './chainFocus'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
@@ -15,8 +15,11 @@ function tid(name: string): number {
 }
 
 let pid = 1
-function planet(name: string, outputs: string[], factoryCount = 1): Planet {
-  return { planetId: pid++, type: 'barren', name, outputs: outputs.map(tid), factoryCount }
+function planet(name: string, outputs: string[], factoryCount = 1, extractionRates?: Record<number, number>): Planet {
+  return {
+    planetId: pid++, type: 'barren', name, outputs: outputs.map(tid), factoryCount,
+    ...(extractionRates ? { extractionRates } : {}),
+  }
 }
 
 let cid = 1
@@ -148,6 +151,96 @@ describe('buildChainModel — broken & bottleneck', () => {
     expect(t.bottleneck?.name).toBe('Silicon')
     expect(t.bottleneck!.ratio).toBeCloseTo(0.5, 5)
     expect(t.iskHrNow).toBeCloseTo(t.iskHrIntended * 0.5, 5)
+  })
+})
+
+describe('buildChainModel — extraction-capped supply', () => {
+  it('caps a P1 planet at its measured extractor yield', () => {
+    // 8 basic facilities nameplate far exceeds what the extractors actually pull;
+    // supply must be the extraction-limited rate, not the facility nameplate.
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Silicon'))!
+    const p0 = sch.inputs[0]
+    const nameplate = sch.output.quantity * (3600 / sch.cycleTime) * 8
+    const p0PerHr = 24_000
+    const capped = p0PerHr * (sch.output.quantity / p0.quantity)
+    expect(capped).toBeLessThan(nameplate) // fixture sanity: the cap actually binds
+
+    const ext = char('Ext', [planet('E', ['Silicon'], 8, { [p0.typeId]: p0PerHr })])
+    const model = buildChainModel([ext], prices({ Silicon: 100 }))
+    expect(model.flows.get(tid('Silicon'))!.supply).toBeCloseTo(capped, 5)
+  })
+
+  it('stays at facility nameplate when extraction outpaces the factories', () => {
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Silicon'))!
+    const p0 = sch.inputs[0]
+    const nameplate = sch.output.quantity * (3600 / sch.cycleTime) * 2
+    const ext = char('Ext', [planet('E', ['Silicon'], 2, { [p0.typeId]: 1_000_000 })])
+    const model = buildChainModel([ext], prices({ Silicon: 100 }))
+    expect(model.flows.get(tid('Silicon'))!.supply).toBeCloseTo(nameplate, 5)
+  })
+})
+
+describe('buildChainModel — root cause vs downstream limit', () => {
+  // Scarce Silicon (1 facility) feeds a double-size Miniature Electronics line,
+  // which in turn feeds a Smartfab Units terminal. Only Silicon is the root
+  // ('constrained'); Mini is a symptom ('limited', pointing at Silicon).
+  const fixture = () => {
+    const ext = char('Ext', [planet('Esi', ['Silicon']), planet('Ech', ['Chiral Structures'], 2)])
+    const fac = char('Fac', [planet('Fme', ['Miniature Electronics'], 2), planet('Fsm', ['Smartfab Units'])])
+    return buildChainModel([ext, fac], prices({ 'Smartfab Units': 5000 }))
+  }
+
+  it("marks the scarce P1 'constrained' with no upstream blame", () => {
+    const si = fixture().flows.get(tid('Silicon'))!
+    expect(si.status).toBe('constrained')
+    expect(si.limitedBy).toBeUndefined()
+    expect(si.ratio).toBeCloseTo(0.5, 5)
+  })
+
+  it("marks the throttled consumer 'limited' and points it at the root", () => {
+    const mini = fixture().flows.get(tid('Miniature Electronics'))!
+    expect(mini.status).toBe('limited')
+    expect(mini.limitedBy).toBe('Silicon')
+    expect(mini.realizedFraction).toBeCloseTo(0.5, 5)
+  })
+
+  it('carries the root cause through to the terminal', () => {
+    const model = fixture()
+    const smart = model.flows.get(tid('Smartfab Units'))!
+    expect(smart.status).toBe('terminal')
+    expect(smart.limitedBy).toBe('Silicon')
+    expect(smart.realizedFraction).toBeCloseTo(0.5, 5)
+    const t = model.terminals.find(t => t.product.name === 'Smartfab Units')!
+    expect(t.bottleneck?.name).toBe('Silicon')
+  })
+
+  it('counts consumer planets per input', () => {
+    const si = fixture().flows.get(tid('Silicon'))!
+    expect(si.consumerCount).toBe(1) // one Mini planet consumes it (double-sized, but ONE planet)
+  })
+})
+
+describe('computeBalanceHints', () => {
+  it('flags only the root supply limit, quantized to whole planets', () => {
+    const ext = char('Ext', [planet('Esi', ['Silicon']), planet('Ech', ['Chiral Structures'], 2)])
+    const fac = char('Fac', [planet('Fme', ['Miniature Electronics'], 2), planet('Fsm', ['Smartfab Units'])])
+    const hints = computeBalanceHints(buildChainModel([ext, fac], prices({ 'Smartfab Units': 5000 })))
+
+    const si = hints.find(h => h.productName === 'Silicon')!
+    expect(si.type).toBe('bottleneck')
+    expect(si.coverage).toBeCloseTo(0.5, 5)
+    expect(si.afterAdd).toBeCloseTo(1.0, 5) // +1 planet of the same size ⇒ full coverage
+    // Mini is throttled BY Silicon — flagging it too would just repeat the root.
+    expect(hints.some(h => h.productName === 'Miniature Electronics')).toBe(false)
+  })
+
+  it('stays quiet about mild under-coverage (normal buffer-fed PI)', () => {
+    // 5 Silicon facilities feed a 6-facility Mini line: 83% coverage — a real
+    // ceiling, but exactly the slack every template empire runs with.
+    const ext = char('Ext', [planet('Esi', ['Silicon'], 5), planet('Ech', ['Chiral Structures'], 6)])
+    const fac = char('Fac', [planet('Fme', ['Miniature Electronics'], 6)])
+    const hints = computeBalanceHints(buildChainModel([ext, fac], prices({ 'Miniature Electronics': 100 })))
+    expect(hints.filter(h => h.type === 'bottleneck')).toEqual([])
   })
 })
 
