@@ -3,7 +3,8 @@ import type { Planet, StoredCharacter } from '../types/api'
 import { DEFAULT_PI_SKILLS } from '../types/api'
 import { PRODUCT_BY_NAME } from '../data/schematics'
 import type { SystemPlanetsMap } from './useSystemPlanets'
-import { computeChainSuggestions, computeBalanceHints, buildShortfallSuggestion } from './useChainSuggestions'
+import { computeChainSuggestions, buildShortfallSuggestion } from './useChainSuggestions'
+import { buildChainModel, computeBalanceHints } from '../components/ChainView/chainModel'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
 let pid = 1
@@ -72,9 +73,13 @@ describe('computeChainSuggestions — completion mode', () => {
   })
 })
 
+// Hints now come from the flow model (see chainModel.test.ts for the coverage /
+// root-cause behavior); here we only cover the shapes buildShortfallSuggestion eats.
 describe('computeBalanceHints', () => {
+  const hintsFor = (chars: StoredCharacter[]) => computeBalanceHints(buildChainModel(chars, {}))
+
   it('returns nothing for an empty empire', () => {
-    expect(computeBalanceHints([])).toEqual([])
+    expect(hintsFor([])).toEqual([])
   })
 
   it('flags a P1 input as a bottleneck when consumers outnumber producers', () => {
@@ -85,12 +90,12 @@ describe('computeBalanceHints', () => {
       planet('F1', ['Miniature Electronics']),
       planet('F2', ['Miniature Electronics']),
     ])
-    const hints = computeBalanceHints([c])
-    const silicon = hints.find(h => h.productName === 'Silicon')
+    const silicon = hintsFor([c]).find(h => h.productName === 'Silicon')
     expect(silicon).toBeDefined()
     expect(silicon!.type).toBe('bottleneck')
     expect(silicon!.producers).toBe(1)
     expect(silicon!.consumers).toBe(2)
+    expect(silicon!.coverage).toBeCloseTo(0.5, 5)
   })
 
   it('flags an over-produced input as excess', () => {
@@ -101,8 +106,7 @@ describe('computeBalanceHints', () => {
       planet('Ech', ['Chiral Structures']),
       planet('F1', ['Miniature Electronics']),
     ])
-    const hints = computeBalanceHints([c])
-    const silicon = hints.find(h => h.productName === 'Silicon')!
+    const silicon = hintsFor([c]).find(h => h.productName === 'Silicon')!
     expect(silicon.type).toBe('excess')
     expect(silicon.producers).toBe(2)
     expect(silicon.consumers).toBe(1)
@@ -114,9 +118,8 @@ describe('computeBalanceHints', () => {
       planet('Ech', ['Chiral Structures']),
       planet('F1', ['Miniature Electronics']),
     ])
-    const hints = computeBalanceHints([c])
     // Miniature Electronics is sold directly — not an imbalance.
-    expect(hints.some(h => h.productName === 'Miniature Electronics')).toBe(false)
+    expect(hintsFor([c]).some(h => h.productName === 'Miniature Electronics')).toBe(false)
   })
 })
 
@@ -129,7 +132,7 @@ describe('buildShortfallSuggestion', () => {
       planet('F1', ['Miniature Electronics']),
       planet('F2', ['Miniature Electronics']),
     ])
-    const hint = computeBalanceHints([c]).find(h => h.productName === 'Silicon')!
+    const hint = computeBalanceHints(buildChainModel([c], {})).find(h => h.productName === 'Silicon')!
     const s = buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)
 
     expect(s).not.toBeNull()

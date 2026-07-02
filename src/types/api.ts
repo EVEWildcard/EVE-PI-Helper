@@ -42,6 +42,9 @@ export interface Planet {
   ccu?: number
   extractorCount?: number
   factoryCount?: number
+  /** Measured extractor yield from ESI: P0 typeId → units/hr (sum of that
+      product's extractor programs). Caps the planet's P1 output estimate. */
+  extractionRates?: Record<number, number>
   expiryTime?: string
 }
 

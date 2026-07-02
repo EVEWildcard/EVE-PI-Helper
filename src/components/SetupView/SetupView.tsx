@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
-import { PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
+import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
+import { planetOutputRate } from '../ChainView/chainModel'
 import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
 import styles from './SetupView.module.css'
 
@@ -493,18 +494,15 @@ function planetIsIdleFactory(planet: Planet): boolean {
   return !planetIsExtractor(planet) && (planet.factoryCount ?? 0) > 0 && (planet.outputs?.length ?? 0) === 0
 }
 
-// units/hr per factory = (output.quantity / cycleTime) * 3600; factoryCount split evenly across outputs.
+// Schematic rate × facilities, extraction-capped where measured — shared with
+// the chain model (planetOutputRate) so Setup and Chain tell the same story.
 function planetIskPerHr(planet: Planet, prices: Record<number, number>): number {
   const outs = planet.outputs ?? []
   if (outs.length === 0) return 0
   return outs.reduce((sum, tid) => {
     const price = prices[tid]
     if (!price) return sum
-    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
-    if (!sch) return sum
-    const factoriesForThis = Math.max(1, Math.floor((planet.factoryCount ?? 1) / outs.length))
-    const unitsPerHr = (sch.output.quantity / sch.cycleTime) * 3600 * factoriesForThis
-    return sum + unitsPerHr * price
+    return sum + planetOutputRate(planet, tid) * price
   }, 0)
 }
 

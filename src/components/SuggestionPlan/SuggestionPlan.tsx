@@ -232,7 +232,7 @@ export function SuggestionPlan({ suggestion: s, characters, onClose, onVerified 
       {/* Shortfall context */}
       {s.shortfallOf && (
         <div className={styles.shortfallBanner}>
-          ⚡ {s.shortfallOf.name} shortfall — {s.shortfallOf.currentProducers} producer{s.shortfallOf.currentProducers !== 1 ? 's' : ''} feeding {s.shortfallOf.consumers} consumer{s.shortfallOf.consumers !== 1 ? 's' : ''}. Add one more producer to restore throughput.
+          ⚡ {s.shortfallOf.name} supply limit — {s.shortfallOf.currentProducers} producer planet{s.shortfallOf.currentProducers !== 1 ? 's' : ''} feeding {s.shortfallOf.consumers} consumer{s.shortfallOf.consumers !== 1 ? 's' : ''}. Supply comes in whole planets: add one more producer to raise the chain's ceiling.
         </div>
       )}
 

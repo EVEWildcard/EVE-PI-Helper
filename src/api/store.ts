@@ -57,6 +57,7 @@ export interface ImportedCharacter {
     ccu?: number
     extractorCount?: number
     factoryCount?: number
+    extractionRates?: Record<number, number>
     expiryTime?: string
   }[]
   skillTraining?: StoredCharacter['skillTraining']
@@ -176,6 +177,7 @@ export const store = {
       ...(p.ccu != null ? { ccu: p.ccu } : {}),
       ...(p.extractorCount != null ? { extractorCount: p.extractorCount } : {}),
       ...(p.factoryCount != null ? { factoryCount: p.factoryCount } : {}),
+      ...(p.extractionRates && Object.keys(p.extractionRates).length > 0 ? { extractionRates: p.extractionRates } : {}),
       ...(p.expiryTime ? { expiryTime: p.expiryTime } : {}),
     }))
 

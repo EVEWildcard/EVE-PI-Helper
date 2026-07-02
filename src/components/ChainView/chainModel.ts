@@ -7,9 +7,20 @@
 // chain-terminal LIST; no React, no DOM here.
 //
 // ── How the numbers work ────────────────────────────────────────────────────
-// Per produced product we compute nameplate SUPPLY (units/hr made) and DEMAND
-// (units/hr consumed by other things you produce), using the same per-planet
-// rate estimate as SetupView (schematic rate × facilities; P1 extractors → 1).
+// Per produced product we compute SUPPLY (units/hr made) and DEMAND (units/hr
+// consumed by other things you produce). Supply is schematic rate × facilities,
+// CAPPED by the planet's measured extractor yield when the ESI import provides
+// it (planet.extractionRates) — a P1 line can't run faster than its extractors
+// feed it, so the cap is what makes P1 supply real instead of nameplate.
+// Demand stays nameplate: it's what the downstream factories WOULD consume at
+// full duty, i.e. the ceiling supply is measured against.
+//
+// GOTCHA 0 (supply < demand is NORMAL): live PI is buffer-fed — factory planets
+// are built to the max facilities that fit CPU/power and burn through hauled-in
+// stockpiles, idling for free in between. So under-coverage isn't a fault per
+// se; it's a throughput ceiling. The model reports it as a percentage and only
+// flags it as an Issue below COVERAGE_ISSUE_THRESHOLD. Supply also only comes
+// in whole planets, so fixes are quantized to "+1 planet of X".
 //
 // GOTCHA 1 (shared inputs = DAG): a P1 can feed two terminals, so naive summing
 // double-counts. The fix is to split a shared producer's output among consumers
@@ -39,22 +50,30 @@ import {
 
 const TIER_RANK: Record<PITier, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
 
+// 'constrained' — ROOT CAUSE: this product's own supply doesn't cover demand and
+//                 nothing upstream throttles it further. The only real fix is
+//                 +1 producer planet; everything downstream inherits the limit.
+// 'limited'    — throttled from upstream: this product could cover its demand
+//                 (or at least its shortfall isn't its own fault first) — the
+//                 binding constraint is `limitedBy`, somewhere below it.
 // 'missing'  — a genuine gap: you build some of this input's own feeders but not
 //              the input itself (a dangling, half-built sub-chain) ⇒ chain BROKEN.
 // 'imported' — you produce none of this input's sub-chain ⇒ you buy/haul it in by
 //              design (the classic factory-only setup). Assumed always available.
-export type ProductStatus = 'terminal' | 'ok' | 'excess' | 'bottleneck' | 'missing' | 'imported'
+export type ProductStatus = 'terminal' | 'ok' | 'excess' | 'constrained' | 'limited' | 'missing' | 'imported'
 
 export interface ProductFlow {
   typeId: number
   name: string
   tier: PITier
-  supply: number            // nameplate units/hr produced across all your planets
+  supply: number            // units/hr produced across all your planets (extraction-capped where measured)
   demand: number            // nameplate units/hr consumed by other things you produce
   ratio: number             // availability = min(1, supply/demand); 1 when nothing consumes it
   realizedFraction: number  // rFrac — fraction of nameplate actually achievable given upstream
   status: ProductStatus
   producerKeys: string[]    // 'charId:planetId' of planets making this
+  consumerCount: number     // planets that consume this as a direct input
+  limitedBy?: string        // deepest upstream product capping rFrac (when rFrac < 1)
   missingInputs: string[]   // direct inputs that are a genuine gap (broken)
   importedInputs: string[]  // direct inputs you buy/haul in by design (not broken)
 }
@@ -97,10 +116,36 @@ function facilitiesFor(planet: Planet): number {
   return Math.max(1, Math.floor((planet.factoryCount ?? 1) / nOut))
 }
 
+/**
+ * Units/hr this planet makes of output `tid`: schematic rate × facilities,
+ * capped by the measured extractor yield when the ESI import provides it — the
+ * factories of a P1 planet can't run faster than its extractors pull P0.
+ * (Shared with SetupView's ISK/hr estimate so both views tell the same story.)
+ */
+export function planetOutputRate(planet: Planet, tid: number): number {
+  const sch = SCHEMATIC_BY_OUTPUT.get(tid)
+  if (!sch) return 0
+  const perHr = 3600 / sch.cycleTime
+  let rate = sch.output.quantity * perHr * facilitiesFor(planet)
+  const extraction = planet.extractionRates
+  if (extraction) {
+    for (const inp of sch.inputs) {
+      const p0PerHr = extraction[inp.typeId]
+      if (p0PerHr == null) continue
+      const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
+      if (!ip || ip.tier !== 'P0') continue
+      // p0PerHr raw units feed input.quantity → output.quantity per cycle.
+      rate = Math.min(rate, p0PerHr * (sch.output.quantity / inp.quantity))
+    }
+  }
+  return rate
+}
+
 export function buildChainModel(characters: StoredCharacter[], prices: Record<number, number>): ChainModel {
   const supply = new Map<number, number>()        // typeId → units/hr produced
   const demand = new Map<number, number>()        // typeId → units/hr consumed (non-P0 inputs)
   const producerKeys = new Map<number, string[]>()
+  const consumerKeys = new Map<number, Set<string>>()
   const producedTypeIds = new Set<number>()
 
   for (const char of characters) {
@@ -113,18 +158,22 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
   for (const char of characters) {
     for (const planet of char.planets) {
       const factories = facilitiesFor(planet)
+      const pKey = planetKey(char.characterId, planet.planetId)
       for (const tid of planet.outputs ?? []) {
         const sch = SCHEMATIC_BY_OUTPUT.get(tid)
         if (!sch) continue
         const perHr = 3600 / sch.cycleTime
-        supply.set(tid, (supply.get(tid) ?? 0) + sch.output.quantity * perHr * factories)
+        supply.set(tid, (supply.get(tid) ?? 0) + planetOutputRate(planet, tid))
         const keys = producerKeys.get(tid) ?? []
-        keys.push(planetKey(char.characterId, planet.planetId))
+        keys.push(pKey)
         producerKeys.set(tid, keys)
         for (const inp of sch.inputs) {
           const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
           if (!ip || ip.tier === 'P0') continue  // P0 is self-extracted, never hauled/missing
           demand.set(inp.typeId, (demand.get(inp.typeId) ?? 0) + inp.quantity * perHr * factories)
+          const cons = consumerKeys.get(inp.typeId) ?? new Set<string>()
+          cons.add(pKey)
+          consumerKeys.set(inp.typeId, cons)
         }
       }
     }
@@ -174,6 +223,7 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
       realizedFraction: 0,
       status: 'ok',
       producerKeys: producerKeys.get(tid) ?? [],
+      consumerCount: consumerKeys.get(tid)?.size ?? 0,
       missingInputs: [],
       importedInputs: [],
     })
@@ -190,6 +240,10 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
   for (const tid of producedNonP0) {
     const sch = SCHEMATIC_BY_OUTPUT.get(tid)
     let frac = 1
+    // Deepest root cause of the binding constraint: a scarce input's own
+    // limitedBy (already resolved — inputs run first in tier order) or, when the
+    // input IS the root, its name. Fixes start there, so that's what we point at.
+    let limitedBy: string | undefined
     const missing: string[] = []
     const imported: string[] = []
     if (sch) {
@@ -200,23 +254,32 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
           // Imported inputs are assumed available (bought/hauled) — they don't break
           // or throttle the chain; only a genuine gap forces realized fraction to 0.
           if (isImported(inp.typeId)) { imported.push(ip.name); importedNames.add(ip.name) }
-          else { frac = 0; missing.push(ip.name) }
+          else if (frac > 0) { frac = 0; missing.push(ip.name); limitedBy = ip.name }
+          else missing.push(ip.name)
           continue
         }
         const inFlow = flows.get(inp.typeId)!
-        frac = Math.min(frac, inFlow.ratio * (rFrac.get(inp.typeId) ?? 1))
+        const avail = inFlow.ratio * (rFrac.get(inp.typeId) ?? 1)
+        if (avail < frac) { frac = avail; limitedBy = inFlow.limitedBy ?? inFlow.name }
       }
     }
     rFrac.set(tid, frac)
     const f = flows.get(tid)
-    if (f) { f.realizedFraction = frac; f.missingInputs = missing; f.importedInputs = imported }
+    if (f) {
+      f.realizedFraction = frac
+      f.missingInputs = missing
+      f.importedInputs = imported
+      if (frac < 0.999 && limitedBy) f.limitedBy = limitedBy
+    }
   }
 
-  // Classify every flow.
+  // Classify every flow. Upstream throttling ('limited') wins over the flow's own
+  // supply/demand balance: the first fix is always at the root, not here.
   for (const f of flows.values()) {
     if (!producedTypeIds.has(f.typeId)) { f.status = isImported(f.typeId) ? 'imported' : 'missing'; continue }
     if (f.demand === 0) { f.status = 'terminal'; continue }
-    if (f.supply < f.demand * 0.999) f.status = 'bottleneck'
+    if (f.realizedFraction < 0.999 && f.limitedBy) f.status = 'limited'
+    else if (f.supply < f.demand * 0.999) f.status = 'constrained'
     else if (f.supply > f.demand * 1.001) f.status = 'excess'
     else f.status = 'ok'
   }
@@ -335,4 +398,51 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
   terminals.sort((a, b) => b.iskHrIntended - a.iskHrIntended || a.product.name.localeCompare(b.product.name))
 
   return { terminals, flows, importedNames }
+}
+
+// ── Balance hints (the "Issues" panel) ──────────────────────────────────────
+// Derived from the flow model, not planet counts: an Issue is a ROOT supply
+// limit ('constrained' — fixing anything downstream of it is pointless) whose
+// coverage is low enough to matter. Coverage between the threshold and 100% is
+// the normal state of buffer-fed PI (factory planets are deliberately oversized
+// and idle for free between hauls), so it stays off the Issues list — the node's
+// own percentage already tells the story.
+
+export interface BalanceHint {
+  type: 'bottleneck' | 'excess'
+  productName: string
+  producers: number     // planets producing this
+  consumers: number     // planets consuming this as input
+  coverage?: number     // supply / demand (bottlenecks only)
+  afterAdd?: number     // coverage with one more producer planet of the same avg size
+}
+
+/** Below this coverage a supply limit becomes an Issue; above it, it's just PI. */
+export const COVERAGE_ISSUE_THRESHOLD = 0.8
+
+export function computeBalanceHints(model: ChainModel): BalanceHint[] {
+  const hints: BalanceHint[] = []
+  for (const f of model.flows.values()) {
+    if (f.status === 'constrained') {
+      const coverage = f.supply / f.demand
+      if (coverage >= COVERAGE_ISSUE_THRESHOLD) continue
+      const producers = f.producerKeys.length
+      hints.push({
+        type: 'bottleneck', productName: f.name,
+        producers, consumers: f.consumerCount,
+        coverage,
+        // Supply comes in whole planets — the only real move is +1 producer.
+        ...(producers > 0 ? { afterAdd: coverage * (producers + 1) / producers } : {}),
+      })
+    } else if (f.status === 'excess') {
+      hints.push({ type: 'excess', productName: f.name, producers: f.producerKeys.length, consumers: f.consumerCount })
+    }
+  }
+  // Bottlenecks first (they cap your output), scarcest first; excess is the
+  // lesser evil (surplus sells), most oversupplied first.
+  return hints.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'bottleneck' ? -1 : 1
+    if (a.type === 'bottleneck') return (a.coverage ?? 1) - (b.coverage ?? 1)
+    return b.producers - b.consumers - (a.producers - a.consumers)
+  })
 }
