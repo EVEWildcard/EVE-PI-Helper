@@ -18,6 +18,11 @@ for (const s of ALL_SCHEMATICS) {
     .filter(x => x.name))
 }
 
+/** "1st", "2nd", "3rd", "4th"… for launchpad positions in the transfer dropdown. */
+function ordinal(n: number): string {
+  return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`
+}
+
 /** "half to A · half to B", or "60% to A · 40% to B" for uneven demand. */
 function formatSplit(splits: { name: string; share: number }[]): string {
   const allEven = splits.every(s => Math.abs(s.share - splits[0].share) < 0.01)
@@ -948,6 +953,16 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                             </span>
                           ))}
                         </div>
+                        {(stop.planet.launchpadCount ?? 0) > 1 && (
+                          <span className={styles.padHint}>
+                            {stop.planet.launchpadCount} launchpads —{' '}
+                            {stop.planet.launchpadInputIndex != null ? (
+                              <>send inputs to the <strong>{ordinal(stop.planet.launchpadInputIndex + 1)}</strong> one in the transfer list (it feeds the factories)</>
+                            ) : (
+                              <>send inputs to the one that feeds the factories</>
+                            )}
+                          </span>
+                        )}
                       </div>
                       {inputs.map(inp => {
                         const key = deliverKey(stop.planet, inp.material)
