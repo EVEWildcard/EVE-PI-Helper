@@ -28,15 +28,6 @@ function formatSplit(splits: { name: string; share: number }[]): string {
   return splits.map(word).join(' · ')
 }
 
-/** Phrase a receiving alt's share of a split deposit, for the "grab your half"
- *  pickup reminder. Even 2-/3-way splits read naturally; anything else falls back
- *  to an approximate percentage. */
-function grabSharePhrase(share: number, parts: number): string {
-  if (parts === 2 && Math.abs(share - 0.5) < 0.02) return 'grab your half'
-  if (parts === 3 && Math.abs(share - 1 / 3) < 0.02) return 'grab your third'
-  return `grab your share (~${Math.round(share * 100)}%)`
-}
-
 /** How much of `material` a character consumes per cycle across all its factories. */
 function materialDemand(char: StoredCharacter, material: string): number {
   let q = 0
@@ -866,8 +857,6 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       {inputs.map(inp => {
                         const key = deliverKey(stop.planet, inp.material)
                         const done = isDone(key)
-                        const splitMap = inp.ready && !inp.self ? splitShareByMaterial.get(inp.material) : undefined
-                        const myShare = splitMap?.get(step.char.characterName)
                         return (
                           <label
                             key={inp.material}
@@ -883,9 +872,6 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                               ) : inp.ready ? (
                                 <span className={styles.sourceNote}>
                                   pick up from container{inp.fromName ? ` · left by ${inp.fromName}` : ''}
-                                  {myShare != null && (
-                                    <span className={styles.splitGrab}> · {grabSharePhrase(myShare, splitMap!.size)}</span>
-                                  )}
                                 </span>
                               ) : (
                                 <span className={styles.waitNote}>⏳ waiting on {inp.waitName ?? 'an earlier alt'} — come back after</span>
