@@ -588,6 +588,17 @@
   margin-left: 3px;
 }
 
+/* Supply limits open a fix plan on click — say so, don't make users guess. */
+.balanceHintFix {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.balanceHint:hover .balanceHintFix { color: #e07a7a; opacity: 1; }
+
 /* Shortfall — an actual loss of output, so it reads red/urgent rather than amber. */
 .balanceHintSevere {
   background: rgba(214, 90, 90, 0.1);

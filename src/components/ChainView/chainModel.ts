@@ -19,7 +19,7 @@
 // are built to the max facilities that fit CPU/power and burn through hauled-in
 // stockpiles, idling for free in between. So under-coverage isn't a fault per
 // se; it's a throughput ceiling. The model reports it as a percentage and only
-// flags it as an Issue below COVERAGE_ISSUE_THRESHOLD. Supply also only comes
+// flags it as an Issue at or below COVERAGE_ISSUE_THRESHOLD. Supply also only comes
 // in whole planets, so fixes are quantized to "+1 planet of X".
 //
 // GOTCHA 1 (shared inputs = DAG): a P1 can feed two terminals, so naive summing
@@ -417,15 +417,17 @@ export interface BalanceHint {
   afterAdd?: number     // coverage with one more producer planet of the same avg size
 }
 
-/** Below this coverage a supply limit becomes an Issue; above it, it's just PI. */
-export const COVERAGE_ISSUE_THRESHOLD = 0.8
+/** At or below this coverage a supply limit becomes an Issue; above it, it's
+    just PI. Half coverage means the producers can't even feed the consumers
+    running half the time — past that, buffer-feeding stops being an excuse. */
+export const COVERAGE_ISSUE_THRESHOLD = 0.5
 
 export function computeBalanceHints(model: ChainModel): BalanceHint[] {
   const hints: BalanceHint[] = []
   for (const f of model.flows.values()) {
     if (f.status === 'constrained') {
       const coverage = f.supply / f.demand
-      if (coverage >= COVERAGE_ISSUE_THRESHOLD) continue
+      if (coverage > COVERAGE_ISSUE_THRESHOLD) continue
       const producers = f.producerKeys.length
       hints.push({
         type: 'bottleneck', productName: f.name,

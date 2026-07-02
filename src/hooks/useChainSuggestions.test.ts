@@ -189,4 +189,29 @@ describe('buildShortfallSuggestion', () => {
     const hint = { type: 'bottleneck' as const, productName: 'Not A Product', producers: 1, consumers: 2 }
     expect(buildShortfallSuggestion(hint, [c], {}, false, NO_SYSTEMS)).toBeNull()
   })
+
+  it('names the target system and counts free matching planets when system data is loaded', () => {
+    // Silicon extracts from lava/plasma planets. The char sits in a system
+    // with two uncolonized lava planets — the plan should say so.
+    const c = char('A', [
+      { ...planet('Adacyne I', ['Silicon']), systemId: 30001 },
+      planet('Ech', ['Chiral Structures']),
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[30001, [
+      { planetId: 101, category: 'lava' },
+      { planetId: 102, category: 'lava' },
+      { planetId: 103, category: 'barren' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    expect(s).not.toBeNull()
+    const step = s!.chainSteps[0]
+    expect(step.role).toBe('extractor')
+    expect(step.planetCategory).toBe('lava')
+    expect(step.systemName).toBe('Adacyne')
+    expect(step.freePlanetsInSystem).toBe(2)
+  })
 })
