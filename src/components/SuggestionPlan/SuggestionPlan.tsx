@@ -50,6 +50,15 @@ interface Action {
   templateUrl?: string // link to DalShooth's PI template repo
 }
 
+// "in J164710 (2 gas planets free)" — where to put the new colony, when known.
+function whereHint(step: ChainSuggestion['chainSteps'][number], kindLabel?: string): string {
+  if (!step.systemName) return ''
+  const free = step.freePlanetsInSystem
+  const what = kindLabel ?? `${step.planetCategory} planet`
+  const count = free != null ? ` (${free} ${what}${free === 1 ? '' : 's'} free)` : ''
+  return ` · in ${step.systemName}${count}`
+}
+
 function buildActions(s: ChainSuggestion): Action[] {
   const actions: Action[] = []
 
@@ -71,7 +80,7 @@ function buildActions(s: ChainSuggestion): Action[] {
       kind: 'extractor',
       character: step.characterName,
       label: `Colonize a ${capitalize(step.planetCategory)} planet`,
-      detail: `Set up extractor: ${step.extractsP0} → ${step.produces}`,
+      detail: `Set up extractor: ${step.extractsP0} → ${step.produces}${whereHint(step)}`,
       templateUrl: buildTemplateUrl('miner', step.produces),
     })
   }
@@ -83,7 +92,7 @@ function buildActions(s: ChainSuggestion): Action[] {
       kind: 'factory',
       character: step.characterName,
       label: `Colonize any planet for a factory`,
-      detail: `Produce ${step.produces} from ${(step.factoryInputs ?? []).join(' + ')}`,
+      detail: `Produce ${step.produces} from ${(step.factoryInputs ?? []).join(' + ')}${whereHint(step, 'planet')}`,
       templateUrl: buildTemplateUrl('factory', step.produces),
     })
   }
@@ -107,7 +116,7 @@ function buildActions(s: ChainSuggestion): Action[] {
         kind: 'factory',
         character: finalStep.characterName,
         label: `Colonize any planet for the ${s.product.tier} factory`,
-        detail: `Produce ${finalStep.produces} from ${(finalStep.factoryInputs ?? []).join(' + ')}`,
+        detail: `Produce ${finalStep.produces} from ${(finalStep.factoryInputs ?? []).join(' + ')}${whereHint(finalStep, 'planet')}`,
         templateUrl: buildTemplateUrl('factory', finalStep.produces),
       })
     }

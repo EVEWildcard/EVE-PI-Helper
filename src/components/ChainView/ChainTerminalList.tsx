@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react'
 import type { StoredCharacter } from '../../types/api'
-import { buildChainModel, type TerminalChain } from './chainModel'
+import { buildChainModel, COVERAGE_ISSUE_THRESHOLD, type TerminalChain } from './chainModel'
 import { TIER_COLOR } from '../../data/tierColors'
 import { SeeEverythingButton } from './SeeEverythingButton'
 import styles from './ChainTerminalList.module.css'
@@ -17,13 +17,11 @@ type Health = 'broken' | 'bottleneck' | 'ok' | 'noprice'
 // Buffer-fed PI normally runs below 100% of factory nameplate (planets are the
 // supply quantum; factories idle for free), so mild throttling is still 'ok' —
 // the row shows the % without raising an alarm. Only genuinely low coverage
-// gets the bottleneck treatment.
-const BOTTLENECK_BELOW = 0.8
-
+// gets the bottleneck treatment; same line the Issues panel draws.
 function healthOf(t: TerminalChain): Health {
   if (t.price <= 0) return 'noprice'
   if (t.broken) return 'broken'
-  if (t.realizedFraction < BOTTLENECK_BELOW) return 'bottleneck'
+  if (t.realizedFraction <= COVERAGE_ISSUE_THRESHOLD) return 'bottleneck'
   return 'ok'
 }
 
@@ -60,7 +58,7 @@ export function ChainTerminalList({ characters, prices, onFocusChain, onSeeEvery
         {terminals.length > 0 && terminals.length <= 4 && (
           <div className={styles.teach}>
             <p>Each row is a <strong>chain</strong> — an end product you sell — ranked by ISK/hr.</p>
-            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> — a % under 100 is your steady-state ceiling, and that’s normal: PI planets rarely balance 1:1, factories just idle for free between hauls. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an upstream supply covers under {Math.round(BOTTLENECK_BELOW * 100)}% of what your factories could run — worth a look. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it. <span className={styles.teachDot} style={{ background: '#8a93a8' }} /> <strong>Imports</strong>: inputs you buy or haul in rather than produce — assumed available, so the chain still runs.</p>
+            <p><span className={styles.teachDot} style={{ background: '#4ab095' }} /> <strong>Running</strong> — a % under 100 is your steady-state ceiling, and that’s normal: PI planets rarely balance 1:1, factories just idle for free between hauls. <span className={styles.teachDot} style={{ background: '#c8a030' }} /> <strong>Bottleneck</strong>: an upstream supply covers {Math.round(COVERAGE_ISSUE_THRESHOLD * 100)}% or less of what your factories could run — worth a look. <span className={styles.teachDot} style={{ background: '#d05050' }} /> <strong>Broken</strong>: a missing upstream input — it earns 0 now, but ≈ the figure shown once you add it. <span className={styles.teachDot} style={{ background: '#8a93a8' }} /> <strong>Imports</strong>: inputs you buy or haul in rather than produce — assumed available, so the chain still runs.</p>
             <p>Click a chain to open just its graph; <strong>See everything</strong> shows the whole empire.</p>
           </div>
         )}
