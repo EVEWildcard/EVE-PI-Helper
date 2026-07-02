@@ -491,6 +491,98 @@
 }
 .navPrimary:hover { background: #5cc4a8; }
 
+/* ── Run complete celebration ── */
+
+.celebration {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.celebrationEmoji { font-size: 52px; line-height: 1; animation: celebrationPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes celebrationPop {
+  0%   { transform: scale(0.2); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.celebrationTitle {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.celebrationSub { margin: 0; font-size: 14px; color: var(--text-secondary); }
+
+.countdownCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 16px 28px;
+  border-radius: 12px;
+  background: rgba(74, 176, 149, 0.08);
+  border: 1px solid rgba(74, 176, 149, 0.3);
+}
+
+.countdownLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.countdownBig {
+  font-size: 24px;
+  font-weight: 800;
+  color: #4ab095;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdownNote { font-size: 12px; color: var(--text-muted); }
+
+.celebrationActions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.celebrationActions .navPrimary { font-size: 14px; padding: 9px 22px; }
+
+/* Confetti — one-shot CSS fall, pieces are stable across re-renders so the
+   minute tick doesn't restart the animation. */
+.confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confettiPiece {
+  position: absolute;
+  top: -16px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confettiFall var(--dur) ease-in var(--delay) 1 forwards;
+}
+
+@keyframes confettiFall {
+  0%   { opacity: 1; transform: translate3d(0, 0, 0) rotateZ(0deg) rotateX(0deg); }
+  100% { opacity: 0.85; transform: translate3d(var(--sway), 110vh, 0) rotateZ(var(--spin)) rotateX(720deg); }
+}
+
 /* ── Empty ── */
 
 .empty { padding: 40px 32px; color: var(--text-muted); font-size: 14px; }
