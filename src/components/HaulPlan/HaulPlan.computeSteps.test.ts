@@ -67,6 +67,30 @@ describe('computeSteps — split deposit between consumers', () => {
   })
 })
 
+describe('computeSteps — consumer that produces the material itself', () => {
+  it('does not deposit a material for an alt that sources it from its own extractor', () => {
+    // Both alts extract Oxygen; Maker also consumes it (Oxides ← Oxygen + Oxidizing).
+    // Maker's delivery row is `self` ("from your own extractor"), so Provider must
+    // NOT be told to leave Oxygen for Maker — it would sit unclaimed.
+    const provider = char('Provider', [planet('Eox', ['Oxygen'])])
+    const maker = char('Maker', [
+      planet('Eox2', ['Oxygen']),
+      planet('Fox', ['Oxides']),
+    ])
+
+    const steps = computeSteps([provider, maker], NOW)
+
+    const providerStep = steps.find(s => s.char.characterName === 'Provider')!
+    expect(providerStep.deposits).toEqual([])
+
+    const makerStep = steps.find(s => s.char.characterName === 'Maker' && !s.isReturn)!
+    const oxygen = makerStep.stops.flatMap(st => st.inputs).find(i => i.material === 'Oxygen')!
+    expect(oxygen.self).toBe(true)
+
+    expect(validateDeliveryUsage(steps)).toEqual([])
+  })
+})
+
 describe('computeSteps — return visit for a deferred delivery', () => {
   it('schedules a return visit when an input is produced by a later (higher-tier) alt', () => {
     // Early makes Coolant (P2) ← Water (self) + Electrolytes. Late extracts the
