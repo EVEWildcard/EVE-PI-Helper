@@ -56,11 +56,11 @@
 
 .workforcePanel {
   flex-shrink: 0;
-  padding: 12px 32px 14px;
+  padding: 8px 32px 9px;
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .wfHeader {
@@ -69,23 +69,23 @@
   gap: 10px;
 }
 .wfTitle {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
 }
 .wfMeta {
-  font-size: 13px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 .wfHero {
   margin-left: auto;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ok);
   font-variant-numeric: tabular-nums;
 }
 .wfHeroSub {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -93,34 +93,34 @@
 .wfTiles {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 .wfTile {
   background: var(--bg-surface);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 6px 10px;
 }
 .wfTileLabel {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 .wfTileVal {
-  font-size: 22px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 .wfTileValSub {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
 }
 .wfBar {
-  height: 4px;
+  height: 3px;
   background: var(--border);
   border-radius: 2px;
-  margin-top: 8px;
+  margin-top: 5px;
   overflow: hidden;
 }
 .wfBarFill {
@@ -135,8 +135,8 @@
   gap: 8px;
 }
 .wfChip {
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 11px;
+  padding: 3px 9px;
   border-radius: 20px;
   cursor: pointer;
   transition: filter 0.12s;
@@ -162,13 +162,13 @@
   gap: 6px;
 }
 .wfFilterLabel {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
   margin-right: 4px;
 }
 .wfFilterBtn {
-  font-size: 12px;
-  padding: 4px 11px;
+  font-size: 11px;
+  padding: 3px 9px;
   border-radius: var(--radius);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -246,6 +246,22 @@
 .rowFlagWarn { background: rgba(224, 160, 48, 0.15); color: var(--warn); }
 
 /* ── Cards row ── */
+
+.cardsArea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 8px 32px 0;
+  flex-shrink: 0;
+}
 
 .cards {
   display: flex;
