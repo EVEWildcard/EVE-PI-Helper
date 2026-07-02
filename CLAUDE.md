@@ -34,7 +34,10 @@ times. Its only jobs: host the worktrees under `.claude/worktrees/` and `git pul
    while you still have the context — not at merge time. Then force-push
    (`git push --force-with-lease`). If the rebase is messy, prefer `git merge origin/dev`.
 3. Open a PR into `dev`: `gh pr create --base dev ...`.
-4. Merge it: `gh pr merge <n> --squash --delete-branch` (deletes the remote branch).
+4. Merge it: `gh pr merge <n> --squash`. **Don't use `--delete-branch` from inside a
+   worktree** — after merging, gh tries to check out `dev` locally, which fails
+   (`'dev' is already used by worktree ...`) and aborts before deleting the remote branch.
+   Instead delete it explicitly: `git push origin --delete <branch>`.
 5. **Promote to prod:** merge `dev` → `main` so it deploys. `gh pr create --base main --head dev ...`
    then `gh pr merge <n> --squash` (keep `dev`). **Whether to promote hands-off vs. wait for the
    user depends on the change — see the promotion policy below.**
