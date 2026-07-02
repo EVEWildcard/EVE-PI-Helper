@@ -283,8 +283,13 @@ export function computeSteps(characters: StoredCharacter[], now: number, orderId
 
     const deposits: DepositItem[] = [...own]
       .map(material => {
+        // A consumer that also produces the material sources it from its own
+        // extractor (its delivery row is `self`) — never from the container —
+        // so leaving a share for it would sit unclaimed.
         const consumers = characters
-          .filter(c2 => c2.characterId !== cid && (neededByChar.get(c2.characterId)?.has(material) ?? false))
+          .filter(c2 => c2.characterId !== cid
+            && (neededByChar.get(c2.characterId)?.has(material) ?? false)
+            && !(producedByChar.get(c2.characterId)?.has(material) ?? false))
         const toNames = consumers.map(c2 => c2.characterName)
         // When a material feeds 2+ consumers, split it by how much each needs.
         let splits: DepositSplit[] | undefined

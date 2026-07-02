@@ -3,6 +3,7 @@ import type { Planet, StoredCharacter } from '../../types/api'
 import { DEFAULT_PI_SKILLS } from '../../types/api'
 import { computeSteps, type AltStep } from './HaulPlan'
 import { validateDeliveryUsage } from './validateDeliveryUsage'
+import { generateEmpireByAccounts, DEFAULT_DEV_ACCOUNTS, MAX_ACCOUNTS } from '../../dev/seedData'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
 let pid = 1
@@ -134,4 +135,17 @@ describe('validateDeliveryUsage', () => {
     const steps = computeSteps([provider, maker], NOW)
     expect(validateDeliveryUsage(steps)).toEqual([])
   })
+
+  // The seeded dev empire cycles duplicate P4 chains across alts, so many
+  // materials have several producers that also consume them — exactly the shape
+  // that exposed the deposit/self asymmetry. The dev guard in HaulPlan must stay
+  // quiet on it at every scale.
+  it.each([1, DEFAULT_DEV_ACCOUNTS, MAX_ACCOUNTS])(
+    'is quiet on the seeded dev empire (%i accounts)',
+    accounts => {
+      const { characters } = generateEmpireByAccounts(accounts)
+      const steps = computeSteps(characters, Date.now())
+      expect(validateDeliveryUsage(steps)).toEqual([])
+    },
+  )
 })
