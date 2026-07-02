@@ -176,6 +176,32 @@ const SCHEMATIC_NAME_TO_TIER: Record<string, string> = {
   'Self-Harmonizing Power Core':'P4','Sterile Conduits':'P4','Wetware Mainframe':'P4',
 }
 
+// Spaceports (launchpads), ESI group 1030 — one type per planet type.
+const LAUNCHPAD_TYPE_IDS = new Set([2256, 2542, 2543, 2544, 2552, 2555, 2556, 2557])
+
+/** Launchpad count + which pad (by transfer-dropdown position) feeds the factories.
+    Pads are ordered by pin_id ascending — creation order, matching the in-game list. */
+function detectLaunchpads(colony: EsiColony): { count: number; inputIndex?: number } {
+  const pads = colony.pins
+    .filter(p => LAUNCHPAD_TYPE_IDS.has(p.type_id))
+    .sort((a, b) => a.pin_id - b.pin_id)
+  if (pads.length === 0) return { count: 0 }
+
+  const factoryPinIds = new Set(colony.pins.filter(p => p.schematic_id != null).map(p => p.pin_id))
+  const padIndexById = new Map(pads.map((p, i) => [p.pin_id, i]))
+  const routesIntoFactories = new Array(pads.length).fill(0) as number[]
+  for (const r of colony.routes ?? []) {
+    const i = padIndexById.get(r.source_pin_id)
+    if (i != null && factoryPinIds.has(r.destination_pin_id)) routesIntoFactories[i]++
+  }
+  const best = Math.max(...routesIntoFactories)
+  // Ambiguous when no pad feeds factories, or two pads tie — better no hint than a wrong one.
+  const inputIndex = best > 0 && routesIntoFactories.filter(n => n === best).length === 1
+    ? routesIntoFactories.indexOf(best)
+    : undefined
+  return { count: pads.length, ...(inputIndex != null ? { inputIndex } : {}) }
+}
+
 interface DetectedOutput { typeId: number; tier: string }
 
 async function detectOutputs(colony: EsiColony): Promise<DetectedOutput[]> {
@@ -276,6 +302,7 @@ export async function importCharacterFromESI(
         (extractionRates[d.product_type_id] ?? 0) + (d.qty_per_cycle * 3600) / d.cycle_time
     }
     const outputNames = await Promise.all(detected.map(d => fetchTypeName(d.typeId)))
+    const launchpads = detectLaunchpads(colony)
     return {
       esiPlanetId: ep.planet_id,
       systemId: info.system_id,
@@ -287,6 +314,8 @@ export async function importCharacterFromESI(
       ccu: ep.upgrade_level,
       extractorCount: extractorPins.length,
       factoryCount: factoryPins.length,
+      ...(launchpads.count > 0 ? { launchpadCount: launchpads.count } : {}),
+      ...(launchpads.inputIndex != null ? { launchpadInputIndex: launchpads.inputIndex } : {}),
       ...(Object.keys(extractionRates).length > 0 ? { extractionRates } : {}),
       expiryTime,
     }

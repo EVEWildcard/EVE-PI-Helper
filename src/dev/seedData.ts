@@ -302,6 +302,11 @@ function buildCharactersFromBuckets(buckets: RawPlanet[][], accounts: number): {
         ccu: r.tier === 'P1' ? 19_600 : 17_900,
         extractorCount: r.extractorCount,
         factoryCount: r.factoryCount,
+        // Every other factory planet gets a second launchpad, to exercise the
+        // "transfer inputs to the Nth pad" hint (every third of those has no
+        // clearly-routed pad, exercising the ambiguous fallback).
+        launchpadCount: !r.extractorCount && i % 2 === 0 ? 2 : 1,
+        ...(!r.extractorCount && i % 2 === 0 && i % 3 !== 2 ? { launchpadInputIndex: (i / 2) % 2 } : {}),
         expiryTime: r.expiryMin != null
           ? new Date(Date.now() + r.expiryMin * 60_000).toISOString()
           : undefined,
