@@ -80,6 +80,7 @@ export function buildSnapshot(): FeedbackSnapshot | null {
       ...(p.ccu != null ? { ccu: p.ccu } : {}),
       ...(p.extractorCount != null ? { extractorCount: p.extractorCount } : {}),
       ...(p.factoryCount != null ? { factoryCount: p.factoryCount } : {}),
+      ...(p.extractionRates ? { extractionRates: p.extractionRates } : {}),
       ...(p.expiryTime ? { expiryTime: p.expiryTime } : {}),
       // dropped: esiPlanetId, systemId (real in-game asset locations)
     }))

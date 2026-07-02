@@ -26,7 +26,11 @@ interface EsiPin {
   type_id: number
   schematic_id?: number
   expiry_time?: string
-  extractor_details?: { product_type_id?: number }
+  extractor_details?: {
+    product_type_id?: number
+    cycle_time?: number      // seconds per extraction cycle of the running program
+    qty_per_cycle?: number   // units pulled per cycle
+  }
 }
 interface EsiColony {
   pins: EsiPin[]
@@ -65,6 +69,10 @@ export interface ImportedPlanet {
   ccu: number
   extractorCount: number
   factoryCount: number
+  /** Measured extractor yield: P0 typeId → units/hr, summed over that product's
+      extractor programs. The chain model caps P1 output with it, replacing the
+      "assume every basic facility runs 24/7" nameplate estimate. */
+  extractionRates?: Record<number, number>
   expiryTime?: string
 }
 
@@ -249,6 +257,17 @@ export async function importCharacterFromESI(
     const factoryPins = colony.pins.filter(p => p.schematic_id != null)
     const expiries = extractorPins.map(p => p.expiry_time).filter(Boolean) as string[]
     const expiryTime = expiries.length > 0 ? expiries.reduce((a, b) => a < b ? a : b) : undefined
+    // Average pull of each running extraction program (qty_per_cycle over its
+    // cycle_time). Expired programs keep reporting their last rate — that's fine:
+    // the expiry pill already nags about resets, and zeroing the whole chain red
+    // on every lapse would be noise, not signal.
+    const extractionRates: Record<number, number> = {}
+    for (const pin of extractorPins) {
+      const d = pin.extractor_details!
+      if (!d.product_type_id || !d.qty_per_cycle || !d.cycle_time) continue
+      extractionRates[d.product_type_id] =
+        (extractionRates[d.product_type_id] ?? 0) + (d.qty_per_cycle * 3600) / d.cycle_time
+    }
     const outputNames = await Promise.all(detected.map(d => fetchTypeName(d.typeId)))
     return {
       esiPlanetId: ep.planet_id,
@@ -261,6 +280,7 @@ export async function importCharacterFromESI(
       ccu: ep.upgrade_level,
       extractorCount: extractorPins.length,
       factoryCount: factoryPins.length,
+      ...(Object.keys(extractionRates).length > 0 ? { extractionRates } : {}),
       expiryTime,
     }
   }))

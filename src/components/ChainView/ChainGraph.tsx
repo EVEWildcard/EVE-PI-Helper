@@ -4,9 +4,9 @@ import { PRODUCT_BY_TYPE_ID, PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME } from '.
 import type { PITier } from '../../data/schematics'
 import { PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
-import { useChainSuggestions, useBalanceHints, buildShortfallSuggestion, type ChainSuggestion, type BalanceHint } from '../../hooks/useChainSuggestions'
+import { useChainSuggestions, buildShortfallSuggestion, type ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
-import { buildChainModel } from './chainModel'
+import { buildChainModel, computeBalanceHints, type BalanceHint } from './chainModel'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
 import {
@@ -450,13 +450,14 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const { systemPlanets, loading: systemPlanetsLoading } = useSystemPlanets(characters)
   const suggestions = useChainSuggestions(characters, prices, assumeMaxSkills, systemPlanets, 30)
-  const balanceHints = useBalanceHints(characters)
-  // Split by severity: bottlenecks (shortfalls) lose money → always up top;
+  const chainModel = useMemo(() => buildChainModel(characters, prices), [characters, prices])
+  // Flow-based hints: only ROOT supply limits below the coverage threshold show
+  // up as Issues — mild under-coverage is normal buffer-fed PI, not a fault.
+  const balanceHints = useMemo(() => computeBalanceHints(chainModel), [chainModel])
+  // Split by severity: supply limits cap your output → always up top;
   // overproduction is the lesser evil → grouped below, collapsible when noisy.
   const bottlenecks = balanceHints.filter(h => h.type === 'bottleneck')
   const excess = balanceHints.filter(h => h.type === 'excess')
-  // Current income = Σ terminal iskHrNow — the basis for the ISK-impact filter.
-  const chainModel = useMemo(() => buildChainModel(characters, prices), [characters, prices])
   const currentIncome = useMemo(
     () => chainModel.terminals.reduce((sum, t) => sum + t.iskHrNow, 0),
     [chainModel]
@@ -835,6 +836,8 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const renderHint = (hint: BalanceHint, idx: number) => {
     const isBottleneck = hint.type === 'bottleneck'
+    const pct = Math.round((hint.coverage ?? 0) * 100)
+    const afterPct = hint.afterAdd != null ? Math.round(hint.afterAdd * 100) : null
     return (
       <div
         key={`${hint.productName}-${idx}`}
@@ -847,13 +850,17 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
           if (fix) setSelectedSuggestion(fix)
         } : undefined}
         title={isBottleneck
-          ? `${hint.productName} is needed by ${hint.consumers} planet${hint.consumers !== 1 ? 's' : ''} but only produced by ${hint.producers}. This is costing you output. Click for a fix plan with the PI template to copy.`
+          ? `Your ${hint.productName} planets cover ${pct}% of what the ${hint.consumers} consuming planet${hint.consumers !== 1 ? 's' : ''} could burn at full duty — that % is this chain's throughput ceiling. Supply only comes in whole planets${afterPct != null ? `: one more ${hint.productName} planet lifts coverage to ~${afterPct}%` : ''}. Click for a fix plan with the PI template to copy.`
           : `${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. The surplus can be sold. Hover to locate it; consider repurposing an extractor.`
         }
       >
         <span className={styles.balanceHintIcon}>{isBottleneck ? '⚡' : '〰'}</span>
         <span className={styles.balanceHintText}>
-          <strong>{hint.productName}</strong> {isBottleneck ? 'shortfall' : 'overproduced'} <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span>
+          {isBottleneck ? (
+            <><strong>{hint.productName}</strong> covers {pct}%{afterPct != null && <span className={styles.balanceHintRatio}> +1 planet → {afterPct}%</span>}</>
+          ) : (
+            <><strong>{hint.productName}</strong> overproduced <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span></>
+          )}
         </span>
       </div>
     )
@@ -896,9 +903,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         {balanceHints.length > 0 && (
           <div className={styles.warningsPanel} style={{ right: showSuggestPanel ? 252 : 12 }}>
             <div className={styles.warningsTitle}>
-              Issues · {bottlenecks.length ? `${bottlenecks.length} shortfall${bottlenecks.length !== 1 ? 's' : ''}` : 'none critical'}
+              Issues · {bottlenecks.length ? `${bottlenecks.length} supply limit${bottlenecks.length !== 1 ? 's' : ''}` : 'none critical'}
             </div>
-            {/* Shortfalls first — these are actually costing you output. */}
+            {/* Supply limits first — these cap the whole chain's output. */}
             {bottlenecks.map(renderHint)}
             {/* Overproduction: the surplus can be sold, so it's demoted and
                 collapsed by default once there's more than a couple. */}
