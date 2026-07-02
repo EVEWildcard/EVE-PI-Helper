@@ -57,6 +57,8 @@ export interface ImportedCharacter {
     ccu?: number
     extractorCount?: number
     factoryCount?: number
+    launchpadCount?: number
+    launchpadInputIndex?: number
     extractionRates?: Record<number, number>
     expiryTime?: string
   }[]

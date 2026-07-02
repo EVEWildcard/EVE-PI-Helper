@@ -69,6 +69,13 @@ export interface ImportedPlanet {
   ccu: number
   extractorCount: number
   factoryCount: number
+  /** How many launchpads the colony has. The in-game transfer dropdown lists
+      them in creation order (= ascending pin_id), which is the order we count in. */
+  launchpadCount?: number
+  /** 0-based position (in that same order) of the launchpad that routes inputs
+      into the factories — the one hauled materials must be transferred to.
+      Only set when it's unambiguous. */
+  launchpadInputIndex?: number
   /** Measured extractor yield: P0 typeId → units/hr, summed over that product's
       extractor programs. The chain model caps P1 output with it, replacing the
       "assume every basic facility runs 24/7" nameplate estimate. */
