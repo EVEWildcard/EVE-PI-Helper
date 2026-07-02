@@ -42,10 +42,12 @@ times. Its only jobs: host the worktrees under `.claude/worktrees/` and `git pul
    then `gh pr merge <n> --squash` (keep `dev`). **Whether to promote hands-off vs. wait for the
    user depends on the change — see the promotion policy below.**
 6. **Clean up:** from the main checkout,
-   `git worktree remove .claude/worktrees/<slug>` and `git branch -d <branch>`, then
-   `git pull` on `dev`. (Harness-created worktrees clean themselves up via ExitWorktree.)
-   If a stale worktree blocks removal, `git worktree remove --force` only after confirming
-   its branch was merged.
+   `git worktree remove .claude/worktrees/<slug>` and `git branch -D <branch>` (`-D`, not
+   `-d` — squash merges mean git can't see the branch as merged; confirm the PR merged
+   first), then `git pull` on `dev`. (Harness-created worktrees clean themselves up via
+   ExitWorktree.) If `git worktree remove` hits a Windows file lock ("Permission denied" /
+   "in use"), it usually still deregisters the worktree — `git worktree prune`, carry on,
+   and delete the leftover directory later once the lock is released.
 
 ### Promotion policy: when to auto-promote `dev` → `main` vs. wait
 
