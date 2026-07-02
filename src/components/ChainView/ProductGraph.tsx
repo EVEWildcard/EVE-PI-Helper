@@ -38,12 +38,16 @@ function coverageOf(flow: ProductFlow): number {
   return flow.demand > 0 ? flow.supply / flow.demand : 1
 }
 
+// Amber band above the Issue threshold: throttled enough to notice at a glance,
+// but still normal buffer-fed PI — it never reaches the Issues list.
+const MILD_BELOW = 0.8
+
 // A root supply limit is graded by how much of demand it covers; everything
 // else keeps its flat status color.
 function accentFor(flow: ProductFlow): string {
   if (flow.status === 'constrained') {
     const c = coverageOf(flow)
-    return c < 0.5 ? SEVERE : c < COVERAGE_ISSUE_THRESHOLD ? MILD : STATUS_COLOR.ok
+    return c <= COVERAGE_ISSUE_THRESHOLD ? SEVERE : c < MILD_BELOW ? MILD : STATUS_COLOR.ok
   }
   return STATUS_COLOR[flow.status]
 }
@@ -192,7 +196,7 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
     for (const c of characters) planets += c.planets.length
     let supplyLimits = 0, excess = 0
     for (const f of flowByKey.values()) {
-      if (f.status === 'missing' || (f.status === 'constrained' && coverageOf(f) < COVERAGE_ISSUE_THRESHOLD)) supplyLimits++
+      if (f.status === 'missing' || (f.status === 'constrained' && coverageOf(f) <= COVERAGE_ISSUE_THRESHOLD)) supplyLimits++
       else if (f.status === 'excess') excess++
     }
     return { planets, products: nodes.length, supplyLimits, excess, alts: characters.filter(c => c.planets.length > 0).length }

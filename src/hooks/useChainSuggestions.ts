@@ -30,6 +30,10 @@ export interface ChainStep {
   characterName: string
   characterId: number
   systemId?: number             // preferred system (where char already operates)
+  systemName?: string           // human label for it, e.g. 'J164710'
+  /** Uncolonized planets of the required kind in the preferred system —
+      matching category for extractors, any category for factories. */
+  freePlanetsInSystem?: number
   produces: string              // P1 for extractors, P2/P3/P4 for factories
   extractsP0?: string           // only for extractors
   factoryInputs?: string[]      // only for factories
@@ -178,6 +182,36 @@ function evalInput(
 // Walks the schematic tree and emits a ChainStep for every planet that needs to be added.
 // Returns steps in dependency order (extractors → lower factories → final factory).
 
+// Planets are named "<system> <roman numeral>" ("J164710 IV"), so the system
+// label is derivable from any planet the character already holds there.
+function systemLabelFor(char: StoredCharacter | undefined, systemId: number | undefined): string | undefined {
+  if (!char || !systemId) return undefined
+  const p = char.planets.find(pl => pl.systemId === systemId)
+  return p?.name.replace(/\s+[IVXLCDM]+$/i, '') || undefined
+}
+
+// Planets in the system that match `cat` (or any category when undefined) and
+// aren't already colonized by one of our characters. Undefined when the
+// system's planet list hasn't loaded — the plan just omits the count.
+function freePlanetsIn(
+  systemId: number | undefined,
+  cat: string | undefined,
+  systemPlanets: SystemPlanetsMap,
+  characters: StoredCharacter[],
+): number | undefined {
+  if (!systemId) return undefined
+  const all = systemPlanets.get(systemId)
+  if (!all?.length) return undefined
+  const total = all.filter(p => !cat || p.category === cat).length
+  let occupied = 0
+  for (const c of characters) {
+    for (const p of c.planets) {
+      if (p.systemId === systemId && (!cat || p.type === cat)) occupied++
+    }
+  }
+  return Math.max(0, total - occupied)
+}
+
 function buildChainSteps(
   productName: string,
   produced: Set<string>,
@@ -185,6 +219,7 @@ function buildChainSteps(
   charsWithSlots: { char: StoredCharacter; slots: number }[],
   characters: StoredCharacter[],
   allSchematics: typeof P1_TO_P2_SCHEMATICS,
+  systemPlanets: SystemPlanetsMap,
 ): ChainStep[] {
   const steps: ChainStep[] = []
 
@@ -225,12 +260,15 @@ function buildChainSteps(
         return avail && (avail.get(c) ?? 0) > 0
       }) ?? cats[0] ?? 'barren'
 
+      const free = freePlanetsIn(bestSystemId, cat, systemPlanets, characters)
       steps.push({
         role: 'extractor',
         planetCategory: cat,
         characterName: bestChar?.characterName ?? '?',
         characterId: bestChar?.characterId ?? 0,
         systemId: bestSystemId,
+        systemName: systemLabelFor(bestChar, bestSystemId),
+        ...(free != null ? { freePlanetsInSystem: free } : {}),
         produces: name,
         extractsP0: p0,
         commandCenter: CATEGORY_COMMAND_CENTER[cat] ?? `${cat} Command Center`,
@@ -247,11 +285,18 @@ function buildChainSteps(
 
     // Then emit the factory step
     const bestChar = charsWithSlots[0]?.char ?? characters[0]
+    // Factories run on any planet type, so the preferred spot is simply the
+    // char's home system — wherever they already operate.
+    const homeSystemId = bestChar?.planets.find(p => p.systemId)?.systemId
+    const freeAny = freePlanetsIn(homeSystemId, undefined, systemPlanets, characters)
     steps.push({
       role: 'factory',
       planetCategory: 'barren',   // factories work on any planet type
       characterName: bestChar?.characterName ?? '?',
       characterId: bestChar?.characterId ?? 0,
+      systemId: homeSystemId,
+      systemName: systemLabelFor(bestChar, homeSystemId),
+      ...(freeAny != null ? { freePlanetsInSystem: freeAny } : {}),
       produces: name,
       factoryInputs: inputNames.filter(Boolean),
       commandCenter: 'Barren Command Center',
@@ -406,7 +451,7 @@ export function computeChainSuggestions(
 
       // Build chain steps for the plan
       const chainSteps = buildChainSteps(
-        product.name, produced, charAvailableCategories, charsWithSlots, characters, allSchematics
+        product.name, produced, charAvailableCategories, charsWithSlots, characters, allSchematics, systemPlanets
       )
 
       const bestChar = repurpose?.char ?? charsWithSlots[0]?.char ?? characters[0]
@@ -548,7 +593,7 @@ export function computeChainSuggestions(
         const allChainSteps: ChainStep[] = []
         for (const leaf of uniqueLeaves) {
           if (stepProduced.has(leaf)) continue
-          const steps = buildChainSteps(leaf, new Set([...produced, ...stepProduced]), charAvailableCategories, charsWithSlots, characters, allSchematics)
+          const steps = buildChainSteps(leaf, new Set([...produced, ...stepProduced]), charAvailableCategories, charsWithSlots, characters, allSchematics, systemPlanets)
           allChainSteps.push(...steps)
           for (const step of steps) stepProduced.add(step.produces)
         }
@@ -657,7 +702,7 @@ export function buildShortfallSuggestion(
   const charAvailableCategories = computeCharAvailableCategories(characters, systemPlanets)
 
   const chainSteps = buildChainSteps(
-    product.name, produced, charAvailableCategories, charsWithSlots, characters, allSchematics
+    product.name, produced, charAvailableCategories, charsWithSlots, characters, allSchematics, systemPlanets
   )
   if (chainSteps.length === 0) return null
 

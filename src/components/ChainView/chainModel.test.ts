@@ -242,6 +242,15 @@ describe('computeBalanceHints', () => {
     const hints = computeBalanceHints(buildChainModel([ext, fac], prices({ 'Miniature Electronics': 100 })))
     expect(hints.filter(h => h.type === 'bottleneck')).toEqual([])
   })
+
+  it('stays quiet just above the 50% line', () => {
+    // 5 Silicon facilities feeding 9 consumers: 56% coverage. Anything over
+    // half is still buffer-fed normal — the node's own % tells the story.
+    const ext = char('Ext', [planet('Esi', ['Silicon'], 5), planet('Ech', ['Chiral Structures'], 9)])
+    const fac = char('Fac', [planet('Fme', ['Miniature Electronics'], 9)])
+    const hints = computeBalanceHints(buildChainModel([ext, fac], prices({ 'Miniature Electronics': 100 })))
+    expect(hints.filter(h => h.type === 'bottleneck')).toEqual([])
+  })
 })
 
 describe('buildChainModel — flows', () => {

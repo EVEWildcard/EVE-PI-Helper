@@ -862,6 +862,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             <><strong>{hint.productName}</strong> overproduced <span className={styles.balanceHintRatio}>×{hint.producers}/{hint.consumers}</span></>
           )}
         </span>
+        {isBottleneck && <span className={styles.balanceHintFix}>fix ›</span>}
       </div>
     )
   }
