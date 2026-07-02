@@ -42,6 +42,12 @@ export interface Planet {
   ccu?: number
   extractorCount?: number
   factoryCount?: number
+  /** Launchpads on the colony, counted in creation order (ascending pin_id) —
+      the same order the in-game transfer dropdown lists them. */
+  launchpadCount?: number
+  /** 0-based position of the launchpad whose routes feed the factories; the pad
+      hauled inputs must be transferred to. Unset when ambiguous. */
+  launchpadInputIndex?: number
   /** Measured extractor yield from ESI: P0 typeId → units/hr (sum of that
       product's extractor programs). Caps the planet's P1 output estimate. */
   extractionRates?: Record<number, number>

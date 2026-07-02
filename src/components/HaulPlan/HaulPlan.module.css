@@ -363,6 +363,8 @@
 .splitLabel { color: var(--text-secondary); font-weight: 600; }
 .splitGrab { color: #c8a030; font-weight: 600; }
 .waitNote { font-size: 12px; color: #c8a030; font-weight: 600; }
+.padHint { flex-basis: 100%; font-size: 12px; color: #c8a030; }
+.padHint strong { font-weight: 800; }
 
 /* ── Timer ── */
 
