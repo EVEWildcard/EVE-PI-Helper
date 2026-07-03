@@ -21,6 +21,7 @@ export interface EsiPlanetInfoPublic {
 export interface SystemPlanet {
   planetId: number
   category: string
+  name?: string           // "J164710 V" — lets plans point at a specific planet
 }
 
 // ── localStorage-backed cache for public data (long TTL, rarely changes) ──
@@ -91,7 +92,7 @@ export async function fetchSystemPlanetTypes(systemId: number): Promise<SystemPl
       try {
         const info = await pub<{ planet_id: number; type_id: number; name: string }>(`/universe/planets/${pid}/`)
         const category = PLANET_BODY_TYPE_CATEGORY[info.type_id] ?? inferCategoryFromName(info.name)
-        return { planetId: pid, category }
+        return { planetId: pid, category, name: info.name }
       } catch {
         return { planetId: pid, category: 'unknown' }
       }

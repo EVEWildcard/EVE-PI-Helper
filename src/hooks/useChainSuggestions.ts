@@ -34,6 +34,9 @@ export interface ChainStep {
   /** Uncolonized planets of the required kind in the preferred system —
       matching category for extractors, any category for factories. */
   freePlanetsInSystem?: number
+  /** Names of those free planets ("J164710 V"), when the system data carries
+      names and every colonized planet could be matched by id. */
+  freePlanetNames?: string[]
   produces: string              // P1 for extractors, P2/P3/P4 for factories
   extractsP0?: string           // only for extractors
   factoryInputs?: string[]      // only for factories
@@ -193,23 +196,35 @@ function systemLabelFor(char: StoredCharacter | undefined, systemId: number | un
 // Planets in the system that match `cat` (or any category when undefined) and
 // aren't already colonized by one of our characters. Undefined when the
 // system's planet list hasn't loaded — the plan just omits the count.
+// Colonies are matched by ESI planet id when they carry one; manually added
+// planets without an id fall back to a per-category count subtraction, in
+// which case we can't tell WHICH planets are free and omit the names.
 function freePlanetsIn(
   systemId: number | undefined,
   cat: string | undefined,
   systemPlanets: SystemPlanetsMap,
   characters: StoredCharacter[],
-): number | undefined {
+): { count: number; names: string[] } | undefined {
   if (!systemId) return undefined
   const all = systemPlanets.get(systemId)
   if (!all?.length) return undefined
-  const total = all.filter(p => !cat || p.category === cat).length
-  let occupied = 0
+
+  const colonizedIds = new Set<number>()
+  let unmatchedOccupied = 0
   for (const c of characters) {
     for (const p of c.planets) {
-      if (p.systemId === systemId && (!cat || p.type === cat)) occupied++
+      if (p.systemId !== systemId) continue
+      if (p.esiPlanetId != null) colonizedIds.add(p.esiPlanetId)
+      else if (!cat || p.type === cat) unmatchedOccupied++
     }
   }
-  return Math.max(0, total - occupied)
+
+  const free = all.filter(p => (!cat || p.category === cat) && !colonizedIds.has(p.planetId))
+  const count = Math.max(0, free.length - unmatchedOccupied)
+  const names = unmatchedOccupied === 0
+    ? free.map(p => p.name).filter((n): n is string => !!n)
+    : []
+  return { count, names }
 }
 
 function buildChainSteps(
@@ -260,6 +275,11 @@ function buildChainSteps(
         return avail && (avail.get(c) ?? 0) > 0
       }) ?? cats[0] ?? 'barren'
 
+      // No system with a matching free planet? Still anchor the step to the
+      // char's home system so the plan can say "none free in X" instead of
+      // silently omitting the location.
+      if (!bestSystemId) bestSystemId = bestChar?.planets.find(p => p.systemId)?.systemId
+
       const free = freePlanetsIn(bestSystemId, cat, systemPlanets, characters)
       steps.push({
         role: 'extractor',
@@ -268,7 +288,8 @@ function buildChainSteps(
         characterId: bestChar?.characterId ?? 0,
         systemId: bestSystemId,
         systemName: systemLabelFor(bestChar, bestSystemId),
-        ...(free != null ? { freePlanetsInSystem: free } : {}),
+        ...(free != null ? { freePlanetsInSystem: free.count } : {}),
+        ...(free?.names.length ? { freePlanetNames: free.names } : {}),
         produces: name,
         extractsP0: p0,
         commandCenter: CATEGORY_COMMAND_CENTER[cat] ?? `${cat} Command Center`,
@@ -296,7 +317,8 @@ function buildChainSteps(
       characterId: bestChar?.characterId ?? 0,
       systemId: homeSystemId,
       systemName: systemLabelFor(bestChar, homeSystemId),
-      ...(freeAny != null ? { freePlanetsInSystem: freeAny } : {}),
+      ...(freeAny != null ? { freePlanetsInSystem: freeAny.count } : {}),
+      ...(freeAny?.names.length ? { freePlanetNames: freeAny.names } : {}),
       produces: name,
       factoryInputs: inputNames.filter(Boolean),
       commandCenter: 'Barren Command Center',

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
+import { PRODUCT_BY_TYPE_ID, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
 import type { ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { formatTrainTime } from '../../hooks/useChainSuggestions'
 import type { StoredCharacter } from '../../types/api'
@@ -50,13 +50,25 @@ interface Action {
   templateUrl?: string // link to DalShooth's PI template repo
 }
 
-// "in J164710 (2 gas planets free)" — where to put the new colony, when known.
+// "in J164710 (V or VIII free)" — where to put the new colony, when known.
+// Zero free planets is said out loud: that's the case the pilot must plan around.
 function whereHint(step: ChainSuggestion['chainSteps'][number], kindLabel?: string): string {
   if (!step.systemName) return ''
   const free = step.freePlanetsInSystem
   const what = kindLabel ?? `${step.planetCategory} planet`
-  const count = free != null ? ` (${free} ${what}${free === 1 ? '' : 's'} free)` : ''
-  return ` · in ${step.systemName}${count}`
+  if (free == null) return ` · in ${step.systemName}`
+  if (free === 0) return ` · ⚠ no ${what} free in ${step.systemName}`
+
+  // Name the actual candidates when known, shortened to their numerals
+  // ("J164710 V" → "V") since the system is already named.
+  const numerals = (step.freePlanetNames ?? [])
+    .map(n => n.startsWith(`${step.systemName} `) ? n.slice(step.systemName!.length + 1) : n)
+  if (numerals.length > 0 && numerals.length <= 4) {
+    const list = numerals.length === 1 ? numerals[0]
+      : `${numerals.slice(0, -1).join(', ')} or ${numerals[numerals.length - 1]}`
+    return ` · in ${step.systemName} (${list} free)`
+  }
+  return ` · in ${step.systemName} (${free} ${what}${free === 1 ? '' : 's'} free)`
 }
 
 function buildActions(s: ChainSuggestion): Action[] {
@@ -123,6 +135,22 @@ function buildActions(s: ChainSuggestion): Action[] {
   }
 
   return actions
+}
+
+// Who eats the short product (currently-produced products with it as an input)
+// and which planets make it — so the banner can name names instead of counting.
+function shortfallContext(name: string, characters: StoredCharacter[]): { consumers: string[]; producers: string[] } {
+  const producers: string[] = []
+  const produced = new Set<string>()
+  for (const c of characters) {
+    for (const p of c.planets) {
+      const outs = p.outputNames ?? []
+      for (const o of outs) produced.add(o)
+      if (outs.includes(name)) producers.push(p.name)
+    }
+  }
+  const consumers = [...produced].filter(o => (SCHEMATIC_INPUTS_BY_NAME.get(o) ?? []).includes(name))
+  return { consumers, producers }
 }
 
 // ── Verify against ESI ────────────────────────────────────────────────────────
@@ -239,11 +267,21 @@ export function SuggestionPlan({ suggestion: s, characters, onClose, onVerified 
       </div>
 
       {/* Shortfall context */}
-      {s.shortfallOf && (
-        <div className={styles.shortfallBanner}>
-          ⚡ {s.shortfallOf.name} supply limit — {s.shortfallOf.currentProducers} producer planet{s.shortfallOf.currentProducers !== 1 ? 's' : ''} feeding {s.shortfallOf.consumers} consumer{s.shortfallOf.consumers !== 1 ? 's' : ''}. Supply comes in whole planets: add one more producer to raise the chain's ceiling.
-        </div>
-      )}
+      {s.shortfallOf && (() => {
+        const sf = s.shortfallOf
+        const { consumers, producers } = shortfallContext(sf.name, characters)
+        const requiredBy = consumers.length
+          ? consumers.join(', ')
+          : `${sf.consumers} consumer${sf.consumers !== 1 ? 's' : ''}`
+        const producedBy = producers.length
+          ? producers.join(', ')
+          : `${sf.currentProducers} planet${sf.currentProducers !== 1 ? 's' : ''}`
+        return (
+          <div className={styles.shortfallBanner}>
+            ⚡ {sf.name} supply limit — required by {requiredBy}, produced only by {producedBy}.
+          </div>
+        )
+      })()}
 
       {/* Skills warning */}
       {s.blocked && (() => {
