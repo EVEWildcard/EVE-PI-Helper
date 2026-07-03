@@ -18,6 +18,28 @@ const FAB_HINT =
 
 type CopyState = 'idle' | 'copying' | 'copied' | 'error'
 
+// The async Clipboard API is unavailable on plain-http origins and throws
+// NotAllowedError in embedded webviews / unfocused documents. The legacy
+// execCommand path works in those contexts, so try it before giving up.
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return
+  } catch {
+    // fall through to execCommand
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  const ok = document.execCommand('copy')
+  ta.remove()
+  if (!ok) throw new Error('copy failed')
+}
+
 export function TemplateSearch() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -37,7 +59,7 @@ export function TemplateSearch() {
     try {
       const res = await fetch(url)
       if (!res.ok) throw new Error()
-      await navigator.clipboard.writeText(await res.text())
+      await copyToClipboard(await res.text())
       setCopyStates(s => ({ ...s, [key]: 'copied' }))
       setTimeout(() => setCopyStates(s => ({ ...s, [key]: 'idle' })), 2000)
     } catch {
