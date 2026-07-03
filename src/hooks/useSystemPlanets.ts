@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { StoredCharacter } from '../types/api'
 
-export interface SystemPlanet { planetId: number; category: string }
+export interface SystemPlanet { planetId: number; category: string; name?: string }
 export type SystemPlanetsMap = Map<number, SystemPlanet[]>  // systemId → planets
 
 export function useSystemPlanets(characters: StoredCharacter[]): {
