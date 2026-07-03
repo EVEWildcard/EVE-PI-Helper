@@ -214,4 +214,47 @@ describe('buildShortfallSuggestion', () => {
     expect(step.systemName).toBe('Adacyne')
     expect(step.freePlanetsInSystem).toBe(2)
   })
+
+  it('names the specific free planets when colonies carry ESI ids', () => {
+    // Planet II is already colonized (matched by esiPlanetId) — only V and
+    // VIII remain, and the plan should name them.
+    const c = char('A', [
+      { ...planet('Adacyne II', ['Silicon']), systemId: 30001, esiPlanetId: 101, type: 'lava' },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[30001, [
+      { planetId: 101, category: 'lava', name: 'Adacyne II' },
+      { planetId: 102, category: 'lava', name: 'Adacyne V' },
+      { planetId: 103, category: 'lava', name: 'Adacyne VIII' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps[0]
+    expect(step.freePlanetsInSystem).toBe(2)
+    expect(step.freePlanetNames).toEqual(['Adacyne V', 'Adacyne VIII'])
+  })
+
+  it('still names the home system when it has NO matching planet (0 free)', () => {
+    // Silicon needs lava/plasma but the home system is all barren — the step
+    // must still carry the system and an explicit zero, not silently omit it.
+    const c = char('A', [
+      { ...planet('Adacyne I', ['Silicon']), systemId: 30001 },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[30001, [
+      { planetId: 101, category: 'barren', name: 'Adacyne I' },
+      { planetId: 102, category: 'barren', name: 'Adacyne II' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps[0]
+    expect(step.role).toBe('extractor')
+    expect(step.systemName).toBe('Adacyne')
+    expect(step.freePlanetsInSystem).toBe(0)
+    expect(step.freePlanetNames).toBeUndefined()
+  })
 })

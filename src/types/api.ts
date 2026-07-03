@@ -132,7 +132,7 @@ declare global {
       setPlanetOutputs: (characterId: number, planetId: number, typeIds: number[]) => Promise<boolean>
       getSchematic: (schematicId: number) => Promise<unknown>
       getPlanetInfo: (planetId: number) => Promise<{ name: string; planet_id: number; system_id: number; type_id: number }>
-      getSystemPlanets: (systemId: number) => Promise<{ planetId: number; category: string }[]>
+      getSystemPlanets: (systemId: number) => Promise<{ planetId: number; category: string; name?: string }[]>
       getSchematicsBatch: (ids: number[]) => Promise<Record<string, { cycle_time: number; schematic_name: string; pins: { type_id: number; quantity: number; is_input: boolean }[] }>>
       getMarketPrices: (typeIds: number[]) => Promise<Record<number, number>>
       getClientId: () => Promise<string>
