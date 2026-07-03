@@ -672,21 +672,31 @@ function WorkforceBar({ stats, filter, setFilter }: {
         </div>
       )}
 
-      <div className={styles.wfFilterBar}>
-        <span className={styles.wfFilterLabel}>Filter</span>
-        {WF_FILTERS.map(({ key, label }) => {
-          const count = stats.filter(s => statMatchesFilter(s, key)).length
-          return (
-            <button
-              key={key}
-              className={`${styles.wfFilterBtn} ${filter === key ? styles.wfFilterBtnActive : ''}`}
-              onClick={() => setFilter(key)}
-            >
-              {label} <span className={styles.wfCount}>{count}</span>
-            </button>
-          )
-        })}
-      </div>
+    </div>
+  )
+}
+
+// Rendered below the workforce panel's divider, sharing a row with the sort buttons.
+function WfFilterBar({ stats, filter, setFilter }: {
+  stats: CharStat[]
+  filter: WorkforceFilter
+  setFilter: (f: WorkforceFilter) => void
+}) {
+  return (
+    <div className={styles.wfFilterBar}>
+      <span className={styles.wfFilterLabel}>Filter</span>
+      {WF_FILTERS.map(({ key, label }) => {
+        const count = stats.filter(s => statMatchesFilter(s, key)).length
+        return (
+          <button
+            key={key}
+            className={`${styles.wfFilterBtn} ${filter === key ? styles.wfFilterBtnActive : ''}`}
+            onClick={() => setFilter(key)}
+          >
+            {label} <span className={styles.wfCount}>{count}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -797,7 +807,26 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
       </div>
 
       {characters.length > 0 && (
-        <WorkforceBar stats={stats} filter={filter} setFilter={setFilter} />
+        <>
+          <WorkforceBar stats={stats} filter={filter} setFilter={setFilter} />
+          <div className={styles.cardsToolbar}>
+            <WfFilterBar stats={stats} filter={filter} setFilter={setFilter} />
+            {filter === 'all' && (
+              <span className={styles.planetSortGroup}>
+                <span className={styles.planetSortLabel}>Sort planets</span>
+                {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
+                  <button
+                    key={opt}
+                    className={`${styles.planetSortBtn} ${planetSort === opt ? styles.planetSortBtnActive : ''}`}
+                    onClick={() => { setPlanetSort(opt); localStorage.setItem('setup.planetSort', opt) }}
+                  >
+                    {opt === 'name' ? 'Name' : opt === 'tier' ? 'Tier' : 'Expiry'}
+                  </button>
+                ))}
+              </span>
+            )}
+          </div>
+        </>
       )}
 
       {filter !== 'all' ? (
@@ -810,20 +839,6 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
         </div>
       ) : (
       <div className={styles.cardsArea}>
-        {characters.length > 0 && (
-          <div className={styles.cardsToolbar}>
-            <span className={styles.planetSortLabel}>Sort planets</span>
-            {(['name', 'tier', 'expiry'] as PlanetSort[]).map(opt => (
-              <button
-                key={opt}
-                className={`${styles.planetSortBtn} ${planetSort === opt ? styles.planetSortBtnActive : ''}`}
-                onClick={() => { setPlanetSort(opt); localStorage.setItem('setup.planetSort', opt) }}
-              >
-                {opt === 'name' ? 'Name' : opt === 'tier' ? 'Tier' : 'Expiry'}
-              </button>
-            ))}
-          </div>
-        )}
       <div className={styles.cards}>
         {visibleStats.map(({ char }) => (
           <CharCard
