@@ -6,4 +6,4 @@ export const APP_VERSION = __APP_VERSION__
 // One-line blurb shown next to the version in the bottom status bar.
 // HARD RULE: keep it VERY short (≤ 80 chars) and do NOT prefix it with the
 // version — the version renders separately. Enforced by src/version.test.ts.
-export const LATEST_CHANGE = 'Plans suggest planet swaps when the needed category is taken'
+export const LATEST_CHANGE = 'No free planet at home? Plans now name the nearest system that has one'
