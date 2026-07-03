@@ -13,3 +13,9 @@ describe('status bar version blurb', () => {
     expect(LATEST_CHANGE).not.toContain(APP_VERSION)
   })
 })
+
+describe('app version', () => {
+  it('is valid semver, injected from package.json', () => {
+    expect(APP_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+  })
+})
