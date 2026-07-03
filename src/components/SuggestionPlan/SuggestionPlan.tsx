@@ -43,7 +43,7 @@ function capitalize(s: string) { return s.charAt(0).toUpperCase() + s.slice(1) }
 
 interface Action {
   id: string
-  kind: 'buy' | 'extractor' | 'factory' | 'repurpose'
+  kind: 'buy' | 'extractor' | 'factory' | 'repurpose' | 'swap'
   character?: string
   label: string        // main action line
   detail?: string      // secondary line
@@ -87,6 +87,24 @@ function buildActions(s: ChainSuggestion): Action[] {
 
   // 2. Extractor steps
   for (const step of s.chainSteps.filter(st => st.role === 'extractor')) {
+    if (step.swap) {
+      // No free planet of the needed category — free one up by relocating an
+      // existing colony's production to a free planet of another category.
+      const sw = step.swap
+      const dest = sw.toPlanetName
+        ? `${sw.toPlanetName} (${sw.toPlanetCategory})`
+        : `a free ${sw.toPlanetCategory} planet`
+      const noFree = step.systemName ? ` — no ${step.planetCategory} planet free in ${step.systemName}` : ''
+      actions.push({
+        id: `swap-${step.produces}`,
+        kind: 'swap',
+        character: sw.fromCharacterName,
+        label: `Move ${sw.movedOutputs.join(', ')} from ${sw.fromPlanetName} to ${dest}`,
+        detail: `Then set up the new extractor on ${sw.fromPlanetName}: ${step.extractsP0} → ${step.produces}${noFree}`,
+        templateUrl: buildTemplateUrl('miner', step.produces),
+      })
+      continue
+    }
     actions.push({
       id: `ext-${step.produces}`,
       kind: 'extractor',

@@ -23,6 +23,18 @@ export interface RepurposeInfo {
   currentOutputNames: string[]
 }
 
+/** When the needed category has zero free planets in the system: a colonized
+    planet of that category whose current production can relocate to a free
+    planet of a DIFFERENT category, so the whole chain still fits in-system
+    (vital in wormholes, where "move 2 jumps over" isn't an option). */
+export interface ChainStepSwap {
+  fromPlanetName: string        // colonized planet of the needed category to vacate
+  fromCharacterName: string     // who owns it
+  movedOutputs: string[]        // what it currently produces (relocates to the free planet)
+  toPlanetName?: string         // free planet to host the displaced production, when named
+  toPlanetCategory: string      // its category — P1 outputs verified extractable there
+}
+
 // A single planet to add as part of the plan
 export interface ChainStep {
   role: 'extractor' | 'factory'
@@ -41,6 +53,8 @@ export interface ChainStep {
   extractsP0?: string           // only for extractors
   factoryInputs?: string[]      // only for factories
   commandCenter: string         // item name to buy
+  /** Present when freePlanetsInSystem is 0 but a same-system swap can free a spot. */
+  swap?: ChainStepSwap
 }
 
 export interface BlockedInfo {
@@ -227,6 +241,65 @@ function freePlanetsIn(
   return { count, names }
 }
 
+// Zero free planets of the needed category, but maybe one of OUR colonies of
+// that category runs production that could live elsewhere: P1 outputs can move
+// to any free planet whose category also extracts them (P1_TO_PLANET_CATEGORIES),
+// factory outputs (P2+) to any free planet at all. If so, suggest vacating that
+// colony for the new extractor and relocating its production to the free planet.
+function findSwapCandidate(
+  systemId: number | undefined,
+  neededCat: string,
+  systemPlanets: SystemPlanetsMap,
+  characters: StoredCharacter[],
+): ChainStepSwap | undefined {
+  if (!systemId) return undefined
+  const all = systemPlanets.get(systemId)
+  if (!all?.length) return undefined
+
+  // Occupied = matched by ESI planet id, or (for manually added colonies) by name
+  const colonizedIds = new Set<number>()
+  const colonizedNames = new Set<string>()
+  for (const c of characters) {
+    for (const p of c.planets) {
+      if (p.systemId !== systemId) continue
+      if (p.esiPlanetId != null) colonizedIds.add(p.esiPlanetId)
+      colonizedNames.add(p.name)
+    }
+  }
+  const freeAny = all.filter(p =>
+    p.category !== neededCat &&   // a free needed-cat planet would mean no swap needed
+    !colonizedIds.has(p.planetId) &&
+    (!p.name || !colonizedNames.has(p.name))
+  )
+  if (freeAny.length === 0) return undefined
+
+  for (const c of characters) {
+    for (const p of c.planets) {
+      if (p.systemId !== systemId) continue
+      const pCat = p.type ?? all.find(sp => sp.planetId === p.esiPlanetId)?.category
+      if (pCat !== neededCat) continue
+      const outputs = p.outputNames ?? []
+      if (outputs.length === 0) continue
+      // One free planet must be able to host EVERYTHING this colony makes
+      const target = freeAny.find(f =>
+        outputs.every(o => {
+          if (PRODUCT_BY_NAME.get(o)?.tier !== 'P1') return true  // factories run anywhere
+          return (P1_TO_PLANET_CATEGORIES[o] ?? []).includes(f.category)
+        })
+      )
+      if (!target) continue
+      return {
+        fromPlanetName: p.name,
+        fromCharacterName: c.characterName,
+        movedOutputs: outputs,
+        ...(target.name ? { toPlanetName: target.name } : {}),
+        toPlanetCategory: target.category,
+      }
+    }
+  }
+  return undefined
+}
+
 function buildChainSteps(
   productName: string,
   produced: Set<string>,
@@ -281,6 +354,12 @@ function buildChainSteps(
       if (!bestSystemId) bestSystemId = bestChar?.planets.find(p => p.systemId)?.systemId
 
       const free = freePlanetsIn(bestSystemId, cat, systemPlanets, characters)
+      const swap = free?.count === 0
+        ? findSwapCandidate(bestSystemId, cat, systemPlanets, characters)
+        : undefined
+      // With a swap the NEW colony lands on the free planet (hosting the
+      // displaced production), so the command center to buy is for ITS category.
+      const ccCat = swap ? swap.toPlanetCategory : cat
       steps.push({
         role: 'extractor',
         planetCategory: cat,
@@ -292,7 +371,8 @@ function buildChainSteps(
         ...(free?.names.length ? { freePlanetNames: free.names } : {}),
         produces: name,
         extractsP0: p0,
-        commandCenter: CATEGORY_COMMAND_CENTER[cat] ?? `${cat} Command Center`,
+        commandCenter: CATEGORY_COMMAND_CENTER[ccCat] ?? `${ccCat} Command Center`,
+        ...(swap ? { swap } : {}),
       })
       return
     }
