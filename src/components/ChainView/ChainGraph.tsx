@@ -843,6 +843,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         key={`${hint.productName}-${idx}`}
         ref={el => { if (el) hintRefs.current.set(hint.productName, el); else hintRefs.current.delete(hint.productName) }}
         className={`${styles.balanceHint} ${isBottleneck ? styles.balanceHintSevere : ''} ${warnProduct === hint.productName ? styles.balanceHintActive : ''} ${hoveredIssueProducts.has(hint.productName) ? styles.balanceHintSpotlight : ''}`}
+        // role="button" also exempts the row from the canvas pan handler, whose
+        // pointer capture would otherwise swallow the click
+        role={isBottleneck ? 'button' : undefined}
         onMouseEnter={() => setWarnProduct(hint.productName)}
         onMouseLeave={() => setWarnProduct(null)}
         onClick={isBottleneck ? () => {
@@ -961,6 +964,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
               <div
                 key={s.key}
                 className={`${styles.suggestRow} ${s.blocked ? styles.suggestRowBlocked : ''} ${hoverSuggestKey === s.key ? styles.suggestRowActive : ''}`}
+                role="button"
                 onMouseEnter={() => setHoverSuggestKey(s.key)}
                 onMouseLeave={() => setHoverSuggestKey(null)}
                 onClick={() => setSelectedSuggestion(s)}
