@@ -285,8 +285,8 @@ export default function App() {
           ☕ Support me on Ko-fi
         </a>
         <span className={styles.statusSpacer} />
-        <span className={styles.statusChange}>{LATEST_CHANGE}</span>
         <span className={styles.statusVersion}>v{APP_VERSION}</span>
+        <span className={styles.statusChange}>{LATEST_CHANGE}</span>
       </div>
 
       {skillEditChar && (

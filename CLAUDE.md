@@ -103,6 +103,13 @@ export GH_TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential 
 
 (PowerShell can't pipe stdin to `git credential fill` reliably — use Bash.)
 
+## Version blurb (status bar)
+
+When bumping `APP_VERSION` in `src/version.ts`, `LATEST_CHANGE` is a **one-line status-bar
+blurb, not a changelog**: keep it ≤ 80 characters and never prefix it with the version
+(the version renders separately, colored, to its left). Enforced by `src/version.test.ts` —
+run `npm test` before committing a version bump.
+
 ## Typecheck
 
 `tsc --noEmit` is a no-op (project refs). Use `tsc -p tsconfig.web.json --noEmit`.
