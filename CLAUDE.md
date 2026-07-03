@@ -103,12 +103,17 @@ export GH_TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential 
 
 (PowerShell can't pipe stdin to `git credential fill` reliably — use Bash.)
 
-## Version blurb (status bar)
+## Versioning (semver) + status bar blurb
 
-When bumping `APP_VERSION` in `src/version.ts`, `LATEST_CHANGE` is a **one-line status-bar
-blurb, not a changelog**: keep it ≤ 80 characters and never prefix it with the version
-(the version renders separately, colored, to its left). Enforced by `src/version.test.ts` —
-run `npm test` before committing a version bump.
+**`package.json`'s `"version"` is the single source of truth** — `APP_VERSION` derives from
+it via Vite `define` (`__APP_VERSION__`); never hardcode a version in `src/version.ts`.
+
+**Every user-visible change bumps it, per semver:** breaking change = major, feature = minor,
+fix/tweak = patch. Bump in the same PR as the change, and update `LATEST_CHANGE` to match.
+
+`LATEST_CHANGE` is a **one-line status-bar blurb, not a changelog**: keep it ≤ 80 characters
+and never prefix it with the version (the version renders separately, colored, to its left).
+Enforced by `src/version.test.ts` — run `npm test` before committing a version bump.
 
 ## Typecheck
 
