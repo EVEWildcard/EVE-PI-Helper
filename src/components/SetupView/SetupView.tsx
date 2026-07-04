@@ -4,7 +4,12 @@ import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
 import { planetOutputRate } from '../ChainView/chainModel'
 import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
+import { POWER_USER_ACCOUNTS } from '../../capacity'
 import styles from './SetupView.module.css'
+
+// How far (in slider steps) a drag must overshoot the POWER_USER_ACCOUNTS
+// detent before the thumb un-sticks and follows the pointer again.
+const SNAP_RELEASE = 2
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -737,6 +742,31 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
     Math.min(MAX_ACCOUNTS, characters.length ? curAccounts : DEFAULT_DEV_ACCOUNTS)
   )
   const commitSeed = () => { seedEmpireByAccounts(seedAccounts); window.location.reload() }
+  // Magnetic detent at the simple/complex boundary (POWER_USER_ACCOUNTS): a
+  // drag that crosses it sticks there until the pointer overshoots by
+  // SNAP_RELEASE steps, so landing exactly on the threshold is easy. Hysteresis
+  // (stick on cross, release on overshoot) keeps every value reachable —
+  // approach from the far side and you never cross, so nothing snaps. Pointer
+  // drags only; keyboard steps are deliberate already.
+  const snapStuck = useRef(false)
+  const sliderDragging = useRef(false)
+  const slideTo = (raw: number) => {
+    setSeedAccounts(prev => {
+      if (snapStuck.current) {
+        if (Math.abs(raw - POWER_USER_ACCOUNTS) < SNAP_RELEASE) return POWER_USER_ACCOUNTS
+        snapStuck.current = false
+        return raw
+      }
+      const crossed =
+        (prev < POWER_USER_ACCOUNTS && raw >= POWER_USER_ACCOUNTS) ||
+        (prev > POWER_USER_ACCOUNTS && raw <= POWER_USER_ACCOUNTS)
+      if (crossed && Math.abs(raw - POWER_USER_ACCOUNTS) < SNAP_RELEASE) {
+        snapStuck.current = true
+        return POWER_USER_ACCOUNTS
+      }
+      return raw
+    })
+  }
 
   // Dev-only: on a fresh local store, auto-seed the default test empire (≈8 alts
   // / 48 planets) with suggestions on, to match the canonical readability-test
@@ -784,12 +814,22 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
                 type="range"
                 min={1}
                 max={MAX_ACCOUNTS}
+                list="dev-scale-detent"
                 value={seedAccounts}
-                onChange={(e) => setSeedAccounts(Number(e.target.value))}
-                onPointerUp={commitSeed}
+                onChange={(e) => {
+                  const raw = Number(e.target.value)
+                  if (sliderDragging.current) slideTo(raw)
+                  else setSeedAccounts(raw)
+                }}
+                onPointerDown={() => { sliderDragging.current = true }}
+                onPointerUp={() => { sliderDragging.current = false; snapStuck.current = false; commitSeed() }}
                 onKeyUp={(e) => { if (e.key !== 'Tab') commitSeed() }}
                 style={{ width: 150, verticalAlign: 'middle' }}
               />
+              {/* Tick mark at the detent so the boundary is visible on the track. */}
+              <datalist id="dev-scale-detent">
+                <option value={POWER_USER_ACCOUNTS} />
+              </datalist>
               {/* Fixed width so the readout never reflows the slider while dragging. */}
               <span style={{ display: 'inline-block', width: 64, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
                 {seedAccounts} acct{seedAccounts === 1 ? '' : 's'}

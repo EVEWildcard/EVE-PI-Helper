@@ -5,6 +5,7 @@ import { ProductGraph } from './ProductGraph'
 import { ChainTerminalList } from './ChainTerminalList'
 import { buildChainModel } from './chainModel'
 import { filterToChain } from './chainFocus'
+import { complexityMode } from '../../capacity'
 import styles from './ChainView.module.css'
 
 // Container for the Production Chain tab. Default view is the ISK-ranked
@@ -33,6 +34,12 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
     () => (localStorage.getItem('chainView.mode') as ViewMode) ?? 'chains'
   )
   const [focusTypeId, setFocusTypeId] = useState<number | null>(null)
+
+  // Complex mode (large empires, internal — see capacity.ts): the raw
+  // per-planet graph doesn't scale past a few accounts, so hide the
+  // "Per-planet detail" entry point and fall back if it was persisted.
+  const complex = complexityMode(characters.length) === 'complex'
+  const effectiveMode = complex && mode === 'graph' ? 'overview' : mode
 
   function go(next: ViewMode) {
     localStorage.setItem('chainView.mode', next)
@@ -76,20 +83,21 @@ export function ChainView({ characters, prices, onRefresh }: Props) {
   }
 
   // "See everything" — the product overview (bounded, readable at any scale).
-  if (mode === 'overview') {
+  if (effectiveMode === 'overview') {
     return (
       <ProductGraph
         characters={characters}
         prices={prices}
         onBack={() => go('chains')}
         backLabel="Chains"
-        onShowPlanets={() => go('graph')}
+        // Complex mode drops the per-planet escape hatch (doesn't scale).
+        onShowPlanets={complex ? undefined : () => go('graph')}
       />
     )
   }
 
   // Escape hatch — the full per-planet graph (heavier; detail when you want it).
-  if (mode === 'graph') {
+  if (effectiveMode === 'graph') {
     return (
       <ChainGraph
         characters={characters}
