@@ -2,6 +2,10 @@ import React, { useState, useMemo } from 'react'
 import { PRODUCT_BY_TYPE_ID, SCHEMATIC_INPUTS_BY_NAME } from '../../data/schematics'
 import type { ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { formatTrainTime } from '../../hooks/useChainSuggestions'
+import {
+  useNearbyFreePlanets, nearbySearchKey, stepNeedsNearbySearch,
+  type NearbyResultsMap, type NearbySearchResult,
+} from '../../hooks/useNearbyFreePlanets'
 import type { StoredCharacter } from '../../types/api'
 import styles from './SuggestionPlan.module.css'
 
@@ -43,21 +47,41 @@ function capitalize(s: string) { return s.charAt(0).toUpperCase() + s.slice(1) }
 
 interface Action {
   id: string
-  kind: 'buy' | 'extractor' | 'factory' | 'repurpose'
+  kind: 'buy' | 'extractor' | 'factory' | 'repurpose' | 'swap'
   character?: string
   label: string        // main action line
   detail?: string      // secondary line
   templateUrl?: string // link to DalShooth's PI template repo
 }
 
+// "· nearest: Adacyne (2 jumps, 1 barren free)" — appended to the zero-free
+// warning once the lazy stargate BFS (useNearbyFreePlanets) reports back.
+function nearestHint(
+  step: ChainSuggestion['chainSteps'][number],
+  nearby: NearbySearchResult | undefined,
+): string {
+  if (!nearby) return ''
+  if (nearby.state === 'searching') return ' · searching nearby systems…'
+  const n = nearby.nearest
+  if (!n) return ' · none within 2 jumps'
+  const label = step.role === 'extractor'
+    ? step.planetCategory
+    : n.freeCount === 1 ? 'planet' : 'planets'
+  return ` · nearest: ${n.systemName} (${n.jumps} jump${n.jumps === 1 ? '' : 's'}, ${n.freeCount} ${label} free)`
+}
+
 // "in J164710 (V or VIII free)" — where to put the new colony, when known.
 // Zero free planets is said out loud: that's the case the pilot must plan around.
-function whereHint(step: ChainSuggestion['chainSteps'][number], kindLabel?: string): string {
+function whereHint(
+  step: ChainSuggestion['chainSteps'][number],
+  kindLabel?: string,
+  nearby?: NearbySearchResult,
+): string {
   if (!step.systemName) return ''
   const free = step.freePlanetsInSystem
   const what = kindLabel ?? `${step.planetCategory} planet`
   if (free == null) return ` · in ${step.systemName}`
-  if (free === 0) return ` · ⚠ no ${what} free in ${step.systemName}`
+  if (free === 0) return ` · ⚠ no ${what} free in ${step.systemName}${nearestHint(step, nearby)}`
 
   // Name the actual candidates when known, shortened to their numerals
   // ("J164710 V" → "V") since the system is already named.
@@ -71,8 +95,10 @@ function whereHint(step: ChainSuggestion['chainSteps'][number], kindLabel?: stri
   return ` · in ${step.systemName} (${free} ${what}${free === 1 ? '' : 's'} free)`
 }
 
-function buildActions(s: ChainSuggestion): Action[] {
+function buildActions(s: ChainSuggestion, nearby: NearbyResultsMap): Action[] {
   const actions: Action[] = []
+  const nearbyFor = (step: ChainSuggestion['chainSteps'][number]) =>
+    stepNeedsNearbySearch(step) ? nearby.get(nearbySearchKey(step)) : undefined
 
   // 1. Buy command centers
   const ccCounts = new Map<string, number>()
@@ -87,12 +113,30 @@ function buildActions(s: ChainSuggestion): Action[] {
 
   // 2. Extractor steps
   for (const step of s.chainSteps.filter(st => st.role === 'extractor')) {
+    if (step.swap) {
+      // No free planet of the needed category — free one up by relocating an
+      // existing colony's production to a free planet of another category.
+      const sw = step.swap
+      const dest = sw.toPlanetName
+        ? `${sw.toPlanetName} (${sw.toPlanetCategory})`
+        : `a free ${sw.toPlanetCategory} planet`
+      const noFree = step.systemName ? ` — no ${step.planetCategory} planet free in ${step.systemName}` : ''
+      actions.push({
+        id: `swap-${step.produces}`,
+        kind: 'swap',
+        character: sw.fromCharacterName,
+        label: `Move ${sw.movedOutputs.join(', ')} from ${sw.fromPlanetName} to ${dest}`,
+        detail: `Then set up the new extractor on ${sw.fromPlanetName}: ${step.extractsP0} → ${step.produces}${noFree}`,
+        templateUrl: buildTemplateUrl('miner', step.produces),
+      })
+      continue
+    }
     actions.push({
       id: `ext-${step.produces}`,
       kind: 'extractor',
       character: step.characterName,
       label: `Colonize a ${capitalize(step.planetCategory)} planet`,
-      detail: `Set up extractor: ${step.extractsP0} → ${step.produces}${whereHint(step)}`,
+      detail: `Set up extractor: ${step.extractsP0} → ${step.produces}${whereHint(step, undefined, nearbyFor(step))}`,
       templateUrl: buildTemplateUrl('miner', step.produces),
     })
   }
@@ -104,7 +148,7 @@ function buildActions(s: ChainSuggestion): Action[] {
       kind: 'factory',
       character: step.characterName,
       label: `Colonize any planet for a factory`,
-      detail: `Produce ${step.produces} from ${(step.factoryInputs ?? []).join(' + ')}${whereHint(step, 'planet')}`,
+      detail: `Produce ${step.produces} from ${(step.factoryInputs ?? []).join(' + ')}${whereHint(step, 'planet', nearbyFor(step))}`,
       templateUrl: buildTemplateUrl('factory', step.produces),
     })
   }
@@ -128,7 +172,7 @@ function buildActions(s: ChainSuggestion): Action[] {
         kind: 'factory',
         character: finalStep.characterName,
         label: `Colonize any planet for the ${s.product.tier} factory`,
-        detail: `Produce ${finalStep.produces} from ${(finalStep.factoryInputs ?? []).join(' + ')}${whereHint(finalStep, 'planet')}`,
+        detail: `Produce ${finalStep.produces} from ${(finalStep.factoryInputs ?? []).join(' + ')}${whereHint(finalStep, 'planet', nearbyFor(finalStep))}`,
         templateUrl: buildTemplateUrl('factory', finalStep.produces),
       })
     }
@@ -185,7 +229,8 @@ function checkFulfilled(s: ChainSuggestion, chars: StoredCharacter[]): { ok: boo
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SuggestionPlan({ suggestion: s, characters, onClose, onVerified }: Props) {
-  const actions = useMemo(() => buildActions(s), [s])
+  const nearby = useNearbyFreePlanets(s.chainSteps, characters)
+  const actions = useMemo(() => buildActions(s, nearby), [s, nearby])
 
   const storageKey = `plan.checked.${s.key}`
   const [checked, setChecked] = useState<Set<string>>(() => {
