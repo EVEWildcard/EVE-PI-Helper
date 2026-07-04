@@ -236,6 +236,113 @@ describe('buildShortfallSuggestion', () => {
     expect(step.freePlanetNames).toEqual(['Adacyne V', 'Adacyne VIII'])
   })
 
+  it('suggests a swap when the needed category is taken but its production can relocate', () => {
+    // Silicon needs lava/plasma. The only lava planet is colonized extracting
+    // Bacteria — which also extracts on barren, and a barren planet is free.
+    // Plan: move Bacteria to the barren planet, put the Silicon extractor on the lava.
+    const c = char('A', [
+      { ...planet('J164710 I', ['Bacteria']), systemId: 31001, esiPlanetId: 101, type: 'lava' },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[31001, [
+      { planetId: 101, category: 'lava', name: 'J164710 I' },
+      { planetId: 102, category: 'barren', name: 'J164710 II' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps[0]
+    expect(step.role).toBe('extractor')
+    expect(step.planetCategory).toBe('lava')
+    expect(step.freePlanetsInSystem).toBe(0)
+    expect(step.swap).toEqual({
+      fromPlanetName: 'J164710 I',
+      fromCharacterName: 'A',
+      movedOutputs: ['Bacteria'],
+      toPlanetName: 'J164710 II',
+      toPlanetCategory: 'barren',
+    })
+    // The new colony lands on the barren planet, so buy a Barren CC
+    expect(step.commandCenter).toBe('Barren Command Center')
+  })
+
+  it('does not suggest a swap when the displaced P1 cannot extract on the free category', () => {
+    // The lava planet extracts Silicon-adjacent Reactive Metals (Base Metals),
+    // which does NOT extract on temperate — the only free planet.
+    const c = char('A', [
+      { ...planet('J164710 I', ['Reactive Metals']), systemId: 31002, esiPlanetId: 101, type: 'lava' },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[31002, [
+      { planetId: 101, category: 'lava', name: 'J164710 I' },
+      { planetId: 102, category: 'temperate', name: 'J164710 II' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps[0]
+    expect(step.freePlanetsInSystem).toBe(0)
+    expect(step.swap).toBeUndefined()
+  })
+
+  it('lets a displaced FACTORY move to a free planet of any category', () => {
+    // The lava planet runs a factory (P2) — factories work anywhere, so even a
+    // temperate free planet can host it.
+    const c = char('A', [
+      { ...planet('J164710 I', ['Miniature Electronics']), systemId: 31003, esiPlanetId: 101, type: 'lava' },
+      planet('Esi', ['Silicon']),
+      planet('Ech', ['Chiral Structures']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[31003, [
+      { planetId: 101, category: 'lava', name: 'J164710 I' },
+      { planetId: 102, category: 'temperate', name: 'J164710 II' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps.find(st => st.produces === 'Silicon')!
+    expect(step.swap).toBeDefined()
+    expect(step.swap!.fromPlanetName).toBe('J164710 I')
+    expect(step.swap!.movedOutputs).toEqual(['Miniature Electronics'])
+    expect(step.swap!.toPlanetCategory).toBe('temperate')
+  })
+
+  it('does not suggest a swap when no colony of the needed category exists', () => {
+    // System is all barren — nothing to vacate for a lava extractor.
+    const c = char('A', [
+      { ...planet('J164710 I', ['Bacteria']), systemId: 31004, esiPlanetId: 101, type: 'barren' },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[31004, [
+      { planetId: 101, category: 'barren', name: 'J164710 I' },
+      { planetId: 102, category: 'barren', name: 'J164710 II' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    const step = s!.chainSteps[0]
+    expect(step.freePlanetsInSystem).toBe(0)
+    expect(step.swap).toBeUndefined()
+  })
+
+  it('emits no swap when a matching planet is free (normal colonize path)', () => {
+    const c = char('A', [
+      { ...planet('Adacyne I', ['Silicon']), systemId: 31005 },
+      planet('F1', ['Miniature Electronics']),
+      planet('F2', ['Miniature Electronics']),
+    ])
+    const systems: SystemPlanetsMap = new Map([[31005, [
+      { planetId: 101, category: 'lava', name: 'Adacyne V' },
+    ]]])
+    const hint = { type: 'bottleneck' as const, productName: 'Silicon', producers: 1, consumers: 2 }
+    const s = buildShortfallSuggestion(hint, [c], {}, false, systems)
+
+    expect(s!.chainSteps[0].swap).toBeUndefined()
+  })
+
   it('still names the home system when it has NO matching planet (0 free)', () => {
     // Silicon needs lava/plasma but the home system is all barren — the step
     // must still carry the system and an explicit zero, not silently omit it.
