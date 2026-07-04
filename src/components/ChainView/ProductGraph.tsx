@@ -5,9 +5,9 @@ import { TIER_COLOR } from '../../data/tierColors'
 import { buildChainModel, COVERAGE_ISSUE_THRESHOLD, type ProductFlow, type ProductStatus } from './chainModel'
 import { buildProductGraph } from './productModel'
 import {
-  NODE_W,
+  NODE_W, NODE_H_EST, WRAP_ROW_GAP,
   computeColCounts, computeTotalW, estimateTotalH, computeScale,
-  computeMeasuredPositions, computeArrows,
+  computeMeasuredPositions, computeArrows, tierSubRows,
   vEstColY as vEstColYPure, getNodeEstPos as getNodeEstPosPure,
   type ChainNode, type ArrowPath,
 } from './chainLayout'
@@ -116,7 +116,59 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
   const [nodePos, setNodePos] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [nodeSizes, setNodeSizes] = useState<Map<string, { w: number; h: number }>>(new Map())
+  // Tier-band geometry (top + height per column) for the full-bleed color washes.
+  const [bandY, setBandY] = useState<Map<number, number>>(new Map())
+  const [bandH, setBandH] = useState<Map<number, number>>(new Map())
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
+
+  // View transform: pan (tx,ty screen px) + zoom. `null` = auto-fit (the original
+  // behavior). Once the user wheels or drags we hold their view until "Fit". Refs
+  // mirror the applied view so the native wheel/pointer handlers (bound once) read
+  // fresh values. Disabled on narrow screens, which keep the scroll path. Ported
+  // from the per-planet graph so both boards pan/zoom identically.
+  type View = { tx: number; ty: number; zoom: number }
+  const [view, setView] = useState<View | null>(null)
+  const viewRef = useRef<View>({ tx: 0, ty: 0, zoom: 1 })
+  const narrowRef = useRef(false)
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const clampZoom = (z: number) => Math.max(0.04, Math.min(2, z))
+    const onWheel = (e: WheelEvent) => {
+      if (narrowRef.current) return
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top
+      const cur = viewRef.current
+      const nz = clampZoom(cur.zoom * Math.exp(-e.deltaY * 0.0015))
+      const cx = (mx - cur.tx) / cur.zoom, cy = (my - cur.ty) / cur.zoom
+      setView({ zoom: nz, tx: mx - cx * nz, ty: my - cy * nz })
+    }
+    let dragging = false, sx = 0, sy = 0, sv = viewRef.current
+    const onDown = (e: PointerEvent) => {
+      if (narrowRef.current || e.button !== 0) return
+      if ((e.target as HTMLElement)?.closest('button, input, a, [role="button"]')) return
+      dragging = true; sx = e.clientX; sy = e.clientY; sv = viewRef.current
+      el.setPointerCapture?.(e.pointerId)
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!dragging) return
+      setView({ zoom: sv.zoom, tx: sv.tx + (e.clientX - sx), ty: sv.ty + (e.clientY - sy) })
+    }
+    const onUp = (e: PointerEvent) => { dragging = false; el.releasePointerCapture?.(e.pointerId) }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
 
   const model = useMemo(() => buildChainModel(characters, prices), [characters, prices])
   const { nodes, edges, flowByKey } = useMemo(() => buildProductGraph(model), [model])
@@ -130,21 +182,23 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
 
   const maxAssignedCol = nodes.reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Hover lights only what flows UP INTO the hovered product (its ancestors +
-  // self), dimming the rest — same as the planet graph. To inspect a downstream
-  // consumer, hover that node.
-  const bwd = useMemo(() => {
-    const bwd = new Map<string, Set<string>>()
+  // Hover lights only what flows DOWN OUT OF the hovered product (its descendants
+  // + self) — "where does this go?" — dimming the rest. This board is read by
+  // product, not by planet: hovering a raw input like Water traces it forward to
+  // the finished goods it ends up in. To see what feeds a product, hover its
+  // inputs. (The per-planet graph goes the other way — upstream supply.)
+  const fwd = useMemo(() => {
+    const fwd = new Map<string, Set<string>>()
     for (const e of edges) {
-      if (!bwd.has(e.toKey)) bwd.set(e.toKey, new Set())
-      bwd.get(e.toKey)!.add(e.fromKey)
+      if (!fwd.has(e.fromKey)) fwd.set(e.fromKey, new Set())
+      fwd.get(e.fromKey)!.add(e.toKey)
     }
-    return bwd
+    return fwd
   }, [edges])
   const highlight = useMemo(() => {
     if (hoveredKey === null) return null
-    return reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
-  }, [hoveredKey, bwd])
+    return reachClosure([hoveredKey], fwd, new Set([hoveredKey]))
+  }, [hoveredKey, fwd])
 
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
   const vEstColY = (col: number) => vEstColYPure(col, colCounts, maxAssignedCol)
@@ -155,20 +209,31 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
   const totalH = svgSize.h || estimateTotalH(colCounts, maxAssignedCol)
   const { isNarrow, scale } = computeScale(containerW, containerH, totalW, totalH)
 
-  // Pass 1: measure node sizes → real positions.
+  // Applied view: the user's pan/zoom when set (wide screens only), else auto-fit
+  // (centered), which is the original behavior. This board is bounded (~66 nodes),
+  // so it always opens fully fit — no big-graph slice like the per-planet graph.
+  const fitView = { tx: Math.max(0, (containerW - totalW * scale) / 2), ty: 0, zoom: scale }
+  const v = (!isNarrow && view) ? view : fitView
+  viewRef.current = v
+  narrowRef.current = isNarrow
+
+  // Pass 1: measure node sizes → real positions + tier-band geometry. DOM sizes
+  // come back scaled by the applied zoom, so divide it back out.
   useLayoutEffect(() => {
-    if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setArrows([]); return }
-    const { scale: currentScale } = computeScale(containerW, containerH, totalW, totalH)
+    if (nodes.length === 0) { setNodePos(new Map()); setNodeSizes(new Map()); setBandY(new Map()); setBandH(new Map()); setArrows([]); return }
+    const zoom = viewRef.current.zoom || 1
     const sizes = new Map<string, { w: number; h: number }>()
     for (const node of nodes) {
       const el = nodeRefs.current.get(node.key)
       if (!el) continue
       const r = el.getBoundingClientRect()
-      sizes.set(node.key, { w: r.width / currentScale, h: r.height / currentScale })
+      sizes.set(node.key, { w: r.width / zoom, h: r.height / zoom })
     }
-    const { positions } = computeMeasuredPositions(nodes, colCounts, maxAssignedCol, sizes)
+    const { positions, bandY, bandH } = computeMeasuredPositions(nodes, colCounts, maxAssignedCol, sizes)
     setNodePos(positions)
     setNodeSizes(sizes)
+    setBandY(bandY)
+    setBandH(bandH)
   }, [nodes, containerW]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pass 2: arrows from settled positions. Empty color map → tier-colored arrows.
@@ -211,6 +276,11 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
           </button>
         )}
         <span className={styles.focusTitle}>Production overview · by product</span>
+        {!isNarrow && view && (
+          <button className={styles.dirBtn} onClick={() => setView(null)} title="Reset zoom & pan to fit the whole graph">
+            Fit · {Math.round(v.zoom * 100)}%
+          </button>
+        )}
         {onShowPlanets && (
           <button className={styles.seeAllBtn} onClick={onShowPlanets} title="Drill into every planet individually (detailed, heavier)">
             Per-planet detail <span className={styles.seeAllIcon}>▦</span>
@@ -224,11 +294,26 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
             Drag to pan · the production chain is best viewed on a wider screen
           </div>
         )}
-        {/* Tier band labels pinned to the canvas left. */}
+        {/* Faint full-bleed tier bands — a color wash across the whole canvas per
+            P-row, so at any pan/zoom you know which tier band you're inside.
+            Screen-space (left:0 right:0 on the canvas), Y converted from canvas
+            coords. Matches the per-planet graph. */}
+        {!isNarrow && activeCols.map(i => {
+          const BAND_PAD = 16
+          const rows = tierSubRows(colCounts, i)
+          const rowH = bandH.get(i) ?? NODE_H_EST
+          const canvasY = (bandY.get(i) ?? vEstColY(i)) - BAND_PAD
+          const canvasH = rowH * rows + WRAP_ROW_GAP * (rows - 1) + BAND_PAD * 2
+          const c = TIER_COLOR[`P${i + 1}` as PITier]
+          return (
+            <div key={`band-${i}`} className={styles.tierBand}
+              style={{ top: canvasY * v.zoom + v.ty, height: canvasH * v.zoom, background: `color-mix(in srgb, ${c} 5%, transparent)` }} />
+          )
+        })}
+        {/* Tier band labels pinned to the canvas left, Y converted to visual coords. */}
         {activeCols.slice().reverse().map(i => {
-          const pos = nodePos.get(nodes.find(n => n.column === i)?.key ?? '')
-          const canvasY = pos?.y ?? vEstColY(i)
-          const top = canvasY * scale
+          const canvasY = bandY.get(i) ?? vEstColY(i)
+          const top = canvasY * v.zoom + v.ty
           return (
             <div key={i} className={styles.rowHeader} style={{ top }}>
               <span className={styles.colTier} style={{ color: TIER_COLOR[`P${i + 1}` as PITier] }}>P{i + 1}</span>
@@ -238,7 +323,7 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
         })}
 
         <div ref={canvasInnerRef} className={styles.canvasInner}
-          style={{ width: totalW, minHeight: totalH, transform: `translateX(${Math.max(0, (containerW - totalW * scale) / 2)}px) scale(${scale})`, transformOrigin: 'top left' }}>
+          style={{ width: totalW, minHeight: totalH, transform: `translate(${v.tx}px, ${v.ty}px) scale(${v.zoom})`, transformOrigin: 'top left' }}>
           <svg className={styles.svg} width={svgSize.w || totalW} height={svgSize.h || totalH}>
             <defs>
               <marker id="arrowhead-prod" viewBox="0 0 10 10" refX="9" refY="5"
