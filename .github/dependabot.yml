@@ -1,0 +1,22 @@
+# Weekly dependency PRs so drift never silently accumulates again.
+# Targets `dev` (the integration branch) — never `main`, which auto-deploys.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    # One grouped PR for routine bumps; majors stay separate so breaking
+    # upgrades are reviewed on their own.
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
