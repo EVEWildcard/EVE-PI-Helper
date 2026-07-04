@@ -22,6 +22,13 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // react-hooks v7 added React-Compiler-derived rules that flag ~23 pre-existing
+      // patterns (setState-in-effect etc.). Adopting them is a codebase cleanup of its
+      // own — deferred; re-enable one at a time when tackling it.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
       // TypeScript already flags undeclared identifiers; no-undef just double-reports.
       'no-undef': 'off',
       // Allow intentionally-unused names prefixed with `_` (e.g. throwaway map args).
