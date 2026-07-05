@@ -303,10 +303,12 @@ function buildCharactersFromBuckets(buckets: RawPlanet[][], accounts: number): {
         extractorCount: r.extractorCount,
         factoryCount: r.factoryCount,
         // Every other factory planet gets a second launchpad, to exercise the
-        // "transfer inputs to the Nth pad" hint (every third of those has no
-        // clearly-routed pad, exercising the ambiguous fallback).
+        // "transfer inputs to the Nth pad" hint. Across those, i % 3 cycles the
+        // three render branches: 0 → one clearly-routed pad, 1 → a tie (both pads
+        // feed factories, named in full), 2 → no routed pad (ambiguous fallback).
         launchpadCount: !r.extractorCount && i % 2 === 0 ? 2 : 1,
-        ...(!r.extractorCount && i % 2 === 0 && i % 3 !== 2 ? { launchpadInputIndex: (i / 2) % 2 } : {}),
+        ...(!r.extractorCount && i % 2 === 0 && i % 3 === 0 ? { launchpadInputIndices: [(i / 2) % 2] } : {}),
+        ...(!r.extractorCount && i % 2 === 0 && i % 3 === 1 ? { launchpadInputIndices: [0, 1] } : {}),
         expiryTime: r.expiryMin != null
           ? new Date(Date.now() + r.expiryMin * 60_000).toISOString()
           : undefined,
