@@ -23,6 +23,16 @@ function ordinal(n: number): string {
   return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`
 }
 
+/** Bold, comma-joined 0-based positions as ordinals: [0,1] → "1st or 2nd". */
+function joinOrdinals(indices: number[]): React.ReactNode {
+  return indices.map((idx, i) => (
+    <React.Fragment key={idx}>
+      {i > 0 && (i === indices.length - 1 ? ' or ' : ', ')}
+      <strong>{ordinal(idx + 1)}</strong>
+    </React.Fragment>
+  ))
+}
+
 /** "half to A · half to B", or "60% to A · 40% to B" for uneven demand. */
 function formatSplit(splits: { name: string; share: number }[]): string {
   const allEven = splits.every(s => Math.abs(s.share - splits[0].share) < 0.01)
@@ -953,16 +963,21 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                             </span>
                           ))}
                         </div>
-                        {(stop.planet.launchpadCount ?? 0) > 1 && (
-                          <span className={styles.padHint}>
-                            {stop.planet.launchpadCount} launchpads —{' '}
-                            {stop.planet.launchpadInputIndex != null ? (
-                              <>send inputs to the <strong>{ordinal(stop.planet.launchpadInputIndex + 1)}</strong> one in the transfer list (it feeds the factories)</>
-                            ) : (
-                              <>send inputs to the one that feeds the factories</>
-                            )}
-                          </span>
-                        )}
+                        {(stop.planet.launchpadCount ?? 0) > 1 && (() => {
+                          const pads = stop.planet.launchpadInputIndices
+                          return (
+                            <span className={styles.padHint}>
+                              {stop.planet.launchpadCount} launchpads —{' '}
+                              {pads && pads.length === 1 ? (
+                                <>send inputs to the <strong>{ordinal(pads[0] + 1)}</strong> one in the transfer list (it feeds the factories)</>
+                              ) : pads && pads.length > 1 ? (
+                                <>send inputs to the {joinOrdinals(pads)} one in the transfer list — they all feed factories</>
+                              ) : (
+                                <>send inputs to the one that feeds the factories</>
+                              )}
+                            </span>
+                          )
+                        })()}
                       </div>
                       {inputs.map(inp => {
                         const key = deliverKey(stop.planet, inp.material)
