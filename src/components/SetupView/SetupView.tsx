@@ -3,13 +3,26 @@ import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
 import { planetOutputRate } from '../ChainView/chainModel'
-import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS } from '../../dev/seedData'
+import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS, type SeedProfile } from '../../dev/seedData'
 import { POWER_USER_ACCOUNTS } from '../../capacity'
 import styles from './SetupView.module.css'
 
 // How far (in slider steps) a drag must overshoot the POWER_USER_ACCOUNTS
 // detent before the thumb un-sticks and follows the pointer again.
 const SNAP_RELEASE = 2
+
+// Dev-only sourcing-profile segmented control (see seedData SeedProfile). The
+// choice is persisted so it survives reloads and the fresh-store auto-seed.
+const SEED_PROFILE_KEY = 'evepi.dev.profile'
+const SEED_PROFILES: { id: SeedProfile; label: string; title: string }[] = [
+  { id: 'produce', label: 'Produce', title: 'Self-sufficient: extract and build the whole P1→P4 chain in-house (no imports).' },
+  { id: 'hybrid',  label: 'Hybrid',  title: 'Buy the raw P1 materials off the market, run factory planets from P2 up.' },
+  { id: 'import',  label: 'Import',  title: 'Buy finished P3 inputs, run pure P4 factories — every input purchased.' },
+]
+function readSeedProfile(): SeedProfile {
+  const v = (typeof localStorage !== 'undefined' && localStorage.getItem(SEED_PROFILE_KEY)) || 'produce'
+  return v === 'hybrid' || v === 'import' ? v : 'produce'
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -741,7 +754,16 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
   const [seedAccounts, setSeedAccounts] = useState(() =>
     Math.min(MAX_ACCOUNTS, characters.length ? curAccounts : DEFAULT_DEV_ACCOUNTS)
   )
-  const commitSeed = () => { seedEmpireByAccounts(seedAccounts); window.location.reload() }
+  // Sourcing profile (produce / hybrid / import) — how much of each chain is
+  // built vs. bought. Persisted so it survives reloads + the fresh-store auto-seed.
+  const [seedProfile, setSeedProfile] = useState<SeedProfile>(readSeedProfile)
+  const commitSeed = () => { seedEmpireByAccounts(seedAccounts, seedProfile); window.location.reload() }
+  const pickProfile = (p: SeedProfile) => {
+    localStorage.setItem(SEED_PROFILE_KEY, p)
+    setSeedProfile(p)
+    seedEmpireByAccounts(seedAccounts, p)
+    window.location.reload()
+  }
   // Magnetic detent at the simple/complex boundary (POWER_USER_ACCOUNTS): a
   // drag that crosses it sticks there until the pointer overshoots by
   // SNAP_RELEASE steps, so landing exactly on the threshold is easy. Hysteresis
@@ -778,7 +800,7 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
     if (localStorage.getItem('evepi.dev.seeded')) return
     localStorage.setItem('evepi.dev.seeded', '1')
     localStorage.setItem('chainView.suggestions', 'true')
-    seedEmpireByAccounts(DEFAULT_DEV_ACCOUNTS)
+    seedEmpireByAccounts(DEFAULT_DEV_ACCOUNTS, readSeedProfile())
     window.location.reload()
   }, [characters.length])
 
@@ -834,6 +856,22 @@ export function SetupView({ characters, onAddCharacter, onImportCharacter, onRem
               <span style={{ display: 'inline-block', width: 64, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
                 {seedAccounts} acct{seedAccounts === 1 ? '' : 's'}
               </span>
+            </span>
+            {/* Sourcing profile: build the chain vs. buy inputs from the market. */}
+            <span className={styles.planetSortGroup} title="Dev: how much of each chain to build in-house vs. buy from the market">
+              <span className={styles.planetSortLabel}>Source</span>
+              {SEED_PROFILES.map(p => (
+                <button
+                  key={p.id}
+                  className={styles.planetSortBtn}
+                  title={p.title}
+                  aria-pressed={seedProfile === p.id}
+                  onClick={() => pickProfile(p.id)}
+                  style={seedProfile === p.id ? { borderColor: 'var(--accent, #6ea8fe)', color: 'var(--accent, #6ea8fe)', fontWeight: 600 } : undefined}
+                >
+                  {p.label}
+                </button>
+              ))}
             </span>
             <button
               className={styles.planetSortBtn}
