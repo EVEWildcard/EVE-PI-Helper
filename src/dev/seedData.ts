@@ -12,16 +12,24 @@
 //     resources include the required raw material (PLANET_RESOURCES).
 //   • Every factory's inputs are taken from the real P1→P2→P3→P4 recipes.
 //
-// Crank the P4-chain count up and you get the "ultimate test": 6–9 maxed
-// characters collectively producing several P4 commodities, with cross-character
-// feeders, split deliveries, and a full spread of extractor urgencies.
+// Terminals span TIERS, not just P4: a realistic empire mixes P1/P2/P3 sale
+// chains with the deep P4 ones (weighted toward the higher tiers). See
+// `terminalPool`.
+//
+// A SOURCING PROFILE decides how much of each chain you build vs. buy from the
+// market (see SeedProfile / PROFILE_FLOOR): 'produce' extracts everything,
+// 'hybrid' buys the raw P1s and runs factories from P2 up, 'import' buys the
+// finished inputs and runs pure P4 factories. The chain model already treats an
+// input whose whole sub-tree you don't build as an intentional IMPORT (healthy),
+// vs. a half-built gap as BROKEN — so a clean tier cut yields healthy importers.
 //
 // Gated behind `import.meta.env.DEV` at the call site, so it is tree-shaken out
 // of production builds.
 
 import {
   PRODUCT_BY_NAME, PRODUCT_BY_TYPE_ID, SCHEMATIC_INPUTS_BY_NAME,
-  SCHEMATIC_BY_OUTPUT, P0_TO_P1_SCHEMATICS, PLANET_RESOURCES, P4_PRODUCTS,
+  SCHEMATIC_BY_OUTPUT, P0_TO_P1_SCHEMATICS, PLANET_RESOURCES,
+  P1_PRODUCTS, P2_PRODUCTS, P3_PRODUCTS, P4_PRODUCTS,
 } from '../data/schematics'
 import { type StoredCharacter, type Planet, type PISkillLevels } from '../types/api'
 import { MAX_ACCOUNTS, ALTS_PER_ACCOUNT, MAX_SUPPORTED_CHARACTERS } from '../capacity'
@@ -48,6 +56,20 @@ export const DEFAULT_DEV_ACCOUNTS = 4
 // empire(N+1) — dragging grows ONE empire, and refactors verify against
 // reproducible data.
 const SLIDER_SEED = 0xc0ffee
+
+// Sourcing profile: how much of each chain you build vs. buy from the market.
+// It's a global PRODUCED-TIER FLOOR — every product at or above the floor is
+// made in-house, everything below is bought/hauled in. A single global floor
+// (rather than a per-chain cut) keeps the import boundary clean: no product
+// below the floor is produced ANYWHERE, so the chain model classes every
+// below-floor input as an intentional import (healthy) instead of a half-built
+// gap (broken). Terminals are also restricted to tiers ≥ the floor, so nothing
+// under the floor sneaks in as a standalone sale chain.
+//   • produce — floor P1: extract & build the whole P1→P4 chain yourself.
+//   • hybrid  — floor P2: buy the raw P1s, run factories from P2 up.
+//   • import  — floor P4: buy finished P3s, run pure P4 factories (all inputs bought).
+export type SeedProfile = 'produce' | 'hybrid' | 'import'
+const PROFILE_FLOOR: Record<SeedProfile, number> = { produce: 1, hybrid: 2, import: 4 }
 
 const NAMES = [
   'Mira Voss', 'Kael Thorne', 'Sera Lux', 'Dex Korrin', 'Vanya Hale', 'Orin Crask',
@@ -131,6 +153,24 @@ function chainProducts(target: string): string[] {
   }
   visit(target)
   return order
+}
+
+// Terminal targets to build chains toward, mixed across tiers so the empire is
+// NOT all-P4 (the old behavior). Only tiers ≥ `floor` are eligible, so the
+// sourcing profile never spawns a produced chain below its floor. Each product
+// is repeated by its tier (P4×4 … P1×1) so higher-value chains stay prominent
+// while lower tiers still show up — a realistic spread rather than a monoculture.
+// Shuffled ONCE with the (seeded) RNG then cycled by the caller, so the sequence
+// is deterministic + independent of empire size ⇒ monotonic prefix-superset.
+const PRODUCTS_BY_TIER: Record<number, { name: string }[]> = {
+  1: P1_PRODUCTS, 2: P2_PRODUCTS, 3: P3_PRODUCTS, 4: P4_PRODUCTS,
+}
+function terminalPool(floor: number): string[] {
+  const weighted: string[] = []
+  for (let t = Math.max(1, floor); t <= 4; t++)
+    for (const p of PRODUCTS_BY_TIER[t] ?? [])
+      for (let k = 0; k < t; k++) weighted.push(p.name)
+  return shuffle(weighted)
 }
 
 interface RawPlanet { product: string; tier: string; type: string; expiryMin?: number; extractorCount?: number; factoryCount?: number }
@@ -282,20 +322,39 @@ function skillsForAlt(ti: number, accounts: number): PISkillLevels {
 }
 const altCapacity = (ti: number, accounts: number) => 1 + skillsForAlt(ti, accounts).interplanetaryConsolidation
 
+// A small cluster of NEARBY systems for one alt: 1–3 systems with consecutive
+// ids + adjacent names, so an alt's planets spread across a couple of close
+// systems (a real haul route) instead of all sitting in one. Deterministic via
+// hashStr — no draw from the monotonic main RNG stream — so it doesn't perturb
+// the raws-derived planet data as the empire grows. Clamped to the planet count
+// so a 1-planet alt stays single-system.
+function altSystems(ci: number, planetCount: number): { id: number; name: string }[] {
+  const size = Math.max(1, Math.min(planetCount, 1 + (hashStr(`sys${ci}`) % 3)))
+  const base = (ci * 3) % SYSTEMS.length
+  const out: { id: number; name: string }[] = []
+  for (let s = 0; s < size; s++)
+    out.push({ id: 31_000_000 + ci * 10 + s, name: SYSTEMS[(base + s) % SYSTEMS.length] })
+  return out
+}
+
 // Turn distributed buckets of raw planets into characters. Per-alt skills come
 // from skillsForAlt(ci, accounts) (deterministic) — no draws from the main RNG
 // stream, so the raws-derived planet data stays stable as the empire grows.
 function buildCharactersFromBuckets(buckets: RawPlanet[][], accounts: number): { characters: StoredCharacter[]; planetTotal: number } {
   let pid = 1
   const characters = buckets.map((bucket, ci) => {
-    const sys = SYSTEMS[ci % SYSTEMS.length]
+    const cluster = altSystems(ci, bucket.length)
+    const perSysCount = new Map<number, number>()  // per-system planet tally → distinct Roman numerals
     const planets: Planet[] = bucket.map((r, i) => {
       const prod = PRODUCT_BY_NAME.get(r.product)!
+      const sys = cluster[i % cluster.length]
+      const nth = (perSysCount.get(sys.id) ?? 0) + 1
+      perSysCount.set(sys.id, nth)
       return {
         planetId: pid++,
-        systemId: 31000000 + ci,
+        systemId: sys.id,
         type: r.type,
-        name: `${sys} ${ROMAN[(i % 8) + 1]}`,
+        name: `${sys.name} ${ROMAN[((nth - 1) % 8) + 1]}`,
         outputs: [prod.typeId],
         outputNames: [prod.name],
         outputTiers: [prod.tier],
@@ -328,12 +387,16 @@ function buildCharactersFromBuckets(buckets: RawPlanet[][], accounts: number): {
 // shuffled pool, so heavy multiboxers' duplicate chains appear) until we reach
 // the requested count, then trim to it. Trimming can clip the last chain — that
 // leaves a realistically "broken" terminal, which is good readability-test fuel.
-function buildRawsForPlanetCount(planetCount: number): RawPlanet[] {
-  const pool = shuffle(P4_PRODUCTS.map(p => p.name))
+function buildRawsForPlanetCount(planetCount: number, floor: number): RawPlanet[] {
+  const pool = terminalPool(floor)
   const raws: RawPlanet[] = []
   let i = 0
   while (raws.length < planetCount && i <= planetCount + pool.length) {
+    // Cut the chain at the profile's floor: keep tiers ≥ floor (built in-house),
+    // drop everything below (bought/hauled in). facilityCounts then rate-balances
+    // only the KEPT planets, so the in-house portion runs healthy on imports.
     const order = chainProducts(pool[i % pool.length])
+      .filter(name => (TIER_NUM[PRODUCT_BY_NAME.get(name)?.tier ?? 'P1'] ?? 1) >= floor)
     const counts = facilityCounts(order)
     for (const product of order) raws.push(makeRawPlanet(product, counts.get(product) ?? 1))
     i++
@@ -366,16 +429,17 @@ function statsFor(characters: StoredCharacter[], raws: RawPlanet[], planetTotal:
  * Empire of `accounts` accounts (1..MAX_ACCOUNTS), each running all 3 alts. The
  * more accounts, the likelier each alt is maxed; at MAX_ACCOUNTS every alt is
  * maxed. The first alt of the first account is always maxed. Every alt is filled
- * to its skill-capacity. Seeded ⇒ reproducible.
+ * to its skill-capacity. `profile` sets how much of each chain is built vs.
+ * bought (see SeedProfile). Seeded ⇒ reproducible.
  */
-export function generateEmpireByAccounts(accounts: number, seed = SLIDER_SEED): { characters: StoredCharacter[]; stats: EmpireStats } {
+export function generateEmpireByAccounts(accounts: number, profile: SeedProfile = 'produce', seed = SLIDER_SEED): { characters: StoredCharacter[]; stats: EmpireStats } {
   const a = Math.max(1, Math.min(MAX_ACCOUNTS, Math.floor(accounts)))
   const altCount = a * ALTS_PER_ACCOUNT
   const caps: number[] = []
   let capacity = 0
   for (let ti = 0; ti < altCount; ti++) { const c = altCapacity(ti, a); caps.push(c); capacity += c }
   _rng = mulberry32(seed)
-  const raws = buildRawsForPlanetCount(capacity)
+  const raws = buildRawsForPlanetCount(capacity, PROFILE_FLOOR[profile] ?? 1)
   const { characters, planetTotal } = buildCharactersFromBuckets(bucketsByCaps(raws, caps), a)
   return { characters, stats: statsFor(characters, raws, planetTotal) }
 }
@@ -389,9 +453,9 @@ function writeStore(characters: StoredCharacter[]): void {
   }))
 }
 
-/** Seed an empire of `accounts` accounts and write it. Caller reloads. */
-export function seedEmpireByAccounts(accounts: number): EmpireStats {
-  const { characters, stats } = generateEmpireByAccounts(accounts)
+/** Seed an empire of `accounts` accounts at `profile` and write it. Caller reloads. */
+export function seedEmpireByAccounts(accounts: number, profile: SeedProfile = 'produce'): EmpireStats {
+  const { characters, stats } = generateEmpireByAccounts(accounts, profile)
   writeStore(characters)
   return stats
 }
