@@ -182,23 +182,22 @@ export function ProductGraph({ characters, prices, onBack, backLabel = 'Back', o
 
   const maxAssignedCol = nodes.reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Hover lights only what flows DOWN OUT OF the hovered product (its descendants
-  // + self) — "where does this go?" — dimming the rest. This board is read by
-  // product, not by planet: hovering a raw input like Water traces it forward to
-  // the finished goods it ends up in. To see what feeds a product, hover its
-  // inputs. (The per-planet graph goes the other way — upstream supply.)
-  const fwd = useMemo(() => {
-    const fwd = new Map<string, Set<string>>()
+  // Hover lights the SUPPLY that feeds the hovered product — its ingredients back
+  // to raw materials (its ancestors + self) — dimming the rest. "What goes into
+  // this?" So hovering Superconductors lights the P1s it's made from, not the P3/P4
+  // it ends up in. Matches the per-planet graph, which also lights upstream supply.
+  const bwd = useMemo(() => {
+    const bwd = new Map<string, Set<string>>()
     for (const e of edges) {
-      if (!fwd.has(e.fromKey)) fwd.set(e.fromKey, new Set())
-      fwd.get(e.fromKey)!.add(e.toKey)
+      if (!bwd.has(e.toKey)) bwd.set(e.toKey, new Set())
+      bwd.get(e.toKey)!.add(e.fromKey)
     }
-    return fwd
+    return bwd
   }, [edges])
   const highlight = useMemo(() => {
     if (hoveredKey === null) return null
-    return reachClosure([hoveredKey], fwd, new Set([hoveredKey]))
-  }, [hoveredKey, fwd])
+    return reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
+  }, [hoveredKey, bwd])
 
   const colCounts = useMemo(() => computeColCounts(nodes), [nodes])
   const vEstColY = (col: number) => vEstColYPure(col, colCounts, maxAssignedCol)
