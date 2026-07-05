@@ -58,7 +58,7 @@ export interface ImportedCharacter {
     extractorCount?: number
     factoryCount?: number
     launchpadCount?: number
-    launchpadInputIndex?: number
+    launchpadInputIndices?: number[]
     extractionRates?: Record<number, number>
     expiryTime?: string
   }[]
@@ -180,7 +180,7 @@ export const store = {
       ...(p.extractorCount != null ? { extractorCount: p.extractorCount } : {}),
       ...(p.factoryCount != null ? { factoryCount: p.factoryCount } : {}),
       ...(p.launchpadCount != null ? { launchpadCount: p.launchpadCount } : {}),
-      ...(p.launchpadInputIndex != null ? { launchpadInputIndex: p.launchpadInputIndex } : {}),
+      ...(p.launchpadInputIndices ? { launchpadInputIndices: p.launchpadInputIndices } : {}),
       ...(p.extractionRates && Object.keys(p.extractionRates).length > 0 ? { extractionRates: p.extractionRates } : {}),
       ...(p.expiryTime ? { expiryTime: p.expiryTime } : {}),
     }))
