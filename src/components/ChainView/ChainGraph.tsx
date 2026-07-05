@@ -550,10 +550,10 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
 
   const maxAssignedCol = nodes.filter(n => !n.unassigned).reduce((m, n) => Math.max(m, n.column), -1)
 
-  // Hover-focus: light the UPSTREAM supply feeding the hovered node — its
-  // ancestors back to extraction — and dim the rest. Downstream consumers are
-  // deliberately left out (hover them to see their own supply). The single-chain
-  // view instead lights the path THROUGH the node since there's only one chain.
+  // Hover-focus: light the supply feeding the hovered node — its ancestors back
+  // to extraction, i.e. everything below it in the chain — and dim the rest. The
+  // consumers it feeds (above it) are deliberately left out; hover them to see
+  // their own supply. Single-chain and full-graph views behave identically here.
   const { fwd, bwd } = useMemo(() => {
     const fwd = new Map<string, Set<string>>()
     const bwd = new Map<string, Set<string>>()
@@ -563,16 +563,12 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   }, [edges])
   const connectedSet = useMemo(() => {
     if (hoveredKey === null) return null
-    if (singleChain) {
-      // Path THROUGH the node: its ancestors plus its descendants (no siblings),
-      // so hovering a mid node in a one-chain view actually narrows the focus.
-      const up = reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
-      return reachClosure([hoveredKey], fwd, up)
-    }
-    // Hover lights only what flows UP INTO this node (its ancestors + self),
-    // never what it feeds. To inspect a downstream consumer, hover that node.
+    // Hover lights only what flows UP INTO this node — its supply below it in the
+    // chain (ancestors + self), never the consumers it feeds. To inspect a
+    // downstream consumer, hover that node. Single-chain view behaves the same:
+    // hovering a mid node narrows the focus to just that node's supply subtree.
     return reachClosure([hoveredKey], bwd, new Set([hoveredKey]))
-  }, [hoveredKey, fwd, bwd, singleChain])
+  }, [hoveredKey, bwd])
 
   // Legend click-to-pin: clicking an alt in the legend persistently focuses just
   // that alt's sub-chain (its planets plus everything up/downstream they connect
@@ -747,6 +743,14 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const shortfallProducts = new Set(bottlenecks.map(h => h.productName))
   const surplusProducts = new Set(excess.map(h => h.productName))
 
+  // Single-chain focus: hovering a node collapses the Issues panel to just the
+  // issues that node is involved in (its own out-of-balance products) and hides
+  // the rest — so a hover leaves only the alts, arrows, and issues on that node's
+  // supply path. At rest, and in the full graph, the whole list shows.
+  const hoverFiltersIssues = singleChain && hoveredKey !== null
+  const shownBottlenecks = hoverFiltersIssues ? bottlenecks.filter(h => hoveredIssueProducts.has(h.productName)) : bottlenecks
+  const shownExcess = hoverFiltersIssues ? excess.filter(h => hoveredIssueProducts.has(h.productName)) : excess
+
   // Warning-chip hover → the nodes that make or consume that product.
   const warnKeys: Set<string> | null = warnProduct
     ? new Set(nodes.filter(n =>
@@ -907,31 +911,32 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
         {balanceHints.length > 0 && (
           <div className={styles.warningsPanel} style={{ right: showSuggestPanel ? 252 : 12 }}>
             <div className={styles.warningsTitle}>
-              Issues · {bottlenecks.length ? `${bottlenecks.length} supply limit${bottlenecks.length !== 1 ? 's' : ''}` : 'none critical'}
+              Issues · {shownBottlenecks.length ? `${shownBottlenecks.length} supply limit${shownBottlenecks.length !== 1 ? 's' : ''}` : 'none critical'}
             </div>
             {/* Supply limits first — these cap the whole chain's output. */}
-            {bottlenecks.map(renderHint)}
+            {shownBottlenecks.map(renderHint)}
             {/* Overproduction: the surplus can be sold, so it's demoted and
-                collapsed by default once there's more than a couple. */}
-            {excess.length > 0 && (
-              excess.length <= 2 || showExcess ? (
+                collapsed by default once there's more than a couple. While a hover
+                is filtering to one node's issues we render them plainly (no toggle). */}
+            {shownExcess.length > 0 && (
+              hoverFiltersIssues || shownExcess.length <= 2 || showExcess ? (
                 <>
-                  {excess.length > 2 && (
+                  {!hoverFiltersIssues && shownExcess.length > 2 && (
                     <button
                       className={styles.excessToggle}
                       onClick={() => setShowExcess(false)}
                     >
-                      ▾ Overproduced · {excess.length}
+                      ▾ Overproduced · {shownExcess.length}
                     </button>
                   )}
-                  {excess.map(renderHint)}
+                  {shownExcess.map(renderHint)}
                 </>
               ) : (
                 <button
                   className={styles.excessToggle}
                   onClick={() => setShowExcess(true)}
                 >
-                  ▸ Overproduced · {excess.length}
+                  ▸ Overproduced · {shownExcess.length}
                 </button>
               )
             )}
@@ -1113,7 +1118,15 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
             stats summary instead and reveal just the hovered chain's alts. */}
         {characters.length > 0 && !isNarrow && (
           <div className={styles.legend}>
-            {!manyAlts ? (
+            {singleChain && highlight && altsInHighlight.length > 0 ? (
+              // Single-chain focus: a hover (or pin) collapses the legend to just
+              // the alts on that node's supply path, hiding the rest. At rest the
+              // full roster shows.
+              <>
+                <div className={styles.legendTitle}>This chain</div>
+                {renderAltRows(altsInHighlight)}
+              </>
+            ) : !manyAlts ? (
               renderAltRows(characters)
             ) : highlight && altsInHighlight.length > 0 ? (
               <>
