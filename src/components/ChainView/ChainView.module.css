@@ -659,6 +659,38 @@
   color: var(--text-secondary);
 }
 
+/* Overproduced products render as a compact wrapping chip cloud rather than a
+   full row each — keeps a 20+ surplus list to one tidy block. */
+.excessChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.excessChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(224, 160, 48, 0.08);
+  border: 1px solid rgba(224, 160, 48, 0.22);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warn);
+  white-space: nowrap;
+  cursor: default;
+  transition: background 0.1s, border-color 0.1s;
+}
+.excessChip:hover, .excessChipActive {
+  background: rgba(224, 160, 48, 0.18);
+  border-color: rgba(224, 160, 48, 0.55);
+}
+.excessChipRatio {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 9px;
+}
+
 /* ── Suggestions column (second right-side column, green-tinted) ── */
 
 .suggestPanel {
@@ -899,8 +931,8 @@
 
 .legend {
   position: absolute;
-  bottom: 78px;       /* bottom-right, stacked above the templates FAB (~52px + gap) —
-                         keeps the left edge clear so the P1/P2 tier labels stay visible */
+  bottom: 16px;       /* bottom-right corner — the templates FAB moved to the bottom-LEFT,
+                         so nothing sits below the legend here anymore */
   right: 16px;
   z-index: 6;         /* above the tier-band labels (.rowHeader, z-index 5); below the
                          warnings panel (15) and the templates panel (50) so those win on overlap */
