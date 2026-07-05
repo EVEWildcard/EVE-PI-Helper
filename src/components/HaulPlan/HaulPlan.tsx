@@ -431,21 +431,23 @@ const VERB_PHRASE: Record<string, string> = {
 
 // Clickable section header. Completed rows in the section are hidden by default to
 // keep the list tidy as you work; clicking the header reveals them again.
-function SectionHeader({ kind, label, done, total, expanded, onToggle, onCompleteAll }: {
+function SectionHeader({ kind, label, done, total, expanded, onToggle, onCompleteAll, collapsible = true }: {
   kind: string; label: string; done: number; total: number
   expanded: boolean; onToggle: () => void; onCompleteAll: () => void
+  collapsible?: boolean
 }) {
   const hasDone = done > 0
+  const canCollapse = collapsible && hasDone
   const complete = total > 0 && done === total
   return (
     <div className={styles.sectionHeaderRow}>
-      <button type="button" className={styles.sectionTitle} onClick={onToggle} data-collapsible={hasDone ? '' : undefined}>
+      <button type="button" className={styles.sectionTitle} onClick={canCollapse ? onToggle : undefined} data-collapsible={canCollapse ? '' : undefined}>
         <span className={styles.sectionDot} data-kind={kind} />
         <span className={styles.sectionLabel}>{label}</span>
         <span className={styles.sectionCount} data-complete={complete ? '' : undefined}>
           {complete ? 'all done' : `${done}/${total}`}
         </span>
-        {hasDone && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
+        {canCollapse && <span className={styles.sectionChevron}>{expanded ? '▾' : '▸'}</span>}
       </button>
       {!complete && total > 1 && (
         <button type="button" className={styles.completeAllBtn} onClick={onCompleteAll} title={`Mark all ${total} as done`}>
@@ -909,10 +911,12 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
             })
             const doneCount = rows.filter(x => x.done).length
             const expanded = expandedSections.has('reset')
-            const visible = expanded ? rows : rows.filter(x => !x.done)
+            // Reset rows stay visible once checked — no auto-collapse — so the
+            // player keeps sight of which extractors they've already ticked.
+            const visible = rows
             return (
               <div className={styles.section}>
-                <SectionHeader kind="reset" label="Reset & collect extractors" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('reset')} onCompleteAll={() => checkAll(rows.map(x => x.key))} />
+                <SectionHeader kind="reset" label="Reset & collect extractors" done={doneCount} total={rows.length} expanded={expanded} onToggle={() => toggleSection('reset')} onCompleteAll={() => checkAll(rows.map(x => x.key))} collapsible={false} />
                 {visible.map(({ r, key, verified, done }) => (
                   <label key={r.planet.planetId} className={`${styles.taskRow} ${done ? styles.taskDone : ''} ${pulsing && r.urgency === 'expired' && !done ? styles.taskPulse : ''}`}>
                     {verified ? (

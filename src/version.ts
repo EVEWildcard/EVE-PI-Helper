@@ -6,4 +6,4 @@ export const APP_VERSION = __APP_VERSION__
 // One-line blurb shown next to the version in the bottom status bar.
 // HARD RULE: keep it VERY short (≤ 80 chars) and do NOT prefix it with the
 // version — the version renders separately. Enforced by src/version.test.ts.
-export const LATEST_CHANGE = 'Haul plan names every launchpad that feeds the factories, ties included'
+export const LATEST_CHANGE = 'Checked reset extractors stay visible instead of collapsing out of view'
