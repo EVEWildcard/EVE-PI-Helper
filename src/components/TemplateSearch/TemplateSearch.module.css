@@ -1,11 +1,14 @@
+/* Parked bottom-LEFT for now — the bottom-right corner was crowded by the issues
+   panel + character roster + legend stack. Real home is a future "tools" section
+   in the toolbar (see roadmap). */
 .root {
   position: absolute;
   bottom: 16px;
-  right: 16px;
+  left: 16px;
   z-index: 50;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 8px;
 }
 

@@ -344,7 +344,7 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
   const canvasRef = useRef<HTMLDivElement>(null)
   // Issue-row elements keyed by product name → so hovering a node can scroll its
   // explaining Issue into view.
-  const hintRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const hintRefs = useRef<Map<string, HTMLElement>>(new Map())
   const [containerW, setContainerW] = useState(0)
   const [containerH, setContainerH] = useState(0)
 
@@ -874,6 +874,23 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
     )
   }
 
+  // Overproduction is lower-priority (the surplus just gets sold), so instead of a
+  // full-width row per product it renders as a compact wrapping chip cloud — 20+
+  // surpluses stay one tidy block. Keeps hover-to-locate + spotlight like the rows.
+  const renderExcessChip = (hint: BalanceHint, idx: number) => (
+    <span
+      key={`${hint.productName}-${idx}`}
+      ref={el => { if (el) hintRefs.current.set(hint.productName, el); else hintRefs.current.delete(hint.productName) }}
+      className={`${styles.excessChip} ${warnProduct === hint.productName ? styles.excessChipActive : ''} ${hoveredIssueProducts.has(hint.productName) ? styles.balanceHintSpotlight : ''}`}
+      onMouseEnter={() => setWarnProduct(hint.productName)}
+      onMouseLeave={() => setWarnProduct(null)}
+      title={`${hint.productName} is produced by ${hint.producers} planet${hint.producers !== 1 ? 's' : ''} but only consumed by ${hint.consumers}. The surplus can be sold. Hover to locate it; consider repurposing an extractor.`}
+    >
+      {hint.productName}
+      <span className={styles.excessChipRatio}>×{hint.producers}/{hint.consumers}</span>
+    </span>
+  )
+
   return (
     <>
     <div className={styles.root}>
@@ -929,7 +946,9 @@ export function ChainGraph({ characters, prices, onRefresh, onBack, backLabel = 
                       ▾ Overproduced · {shownExcess.length}
                     </button>
                   )}
-                  {shownExcess.map(renderHint)}
+                  <div className={styles.excessChips}>
+                    {shownExcess.map(renderExcessChip)}
+                  </div>
                 </>
               ) : (
                 <button
