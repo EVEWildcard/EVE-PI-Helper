@@ -72,10 +72,11 @@ export interface ImportedPlanet {
   /** How many launchpads the colony has. The in-game transfer dropdown lists
       them in creation order (= ascending pin_id), which is the order we count in. */
   launchpadCount?: number
-  /** 0-based position (in that same order) of the launchpad that routes inputs
-      into the factories — the one hauled materials must be transferred to.
-      Only set when it's unambiguous. */
-  launchpadInputIndex?: number
+  /** 0-based positions (in that same order) of the launchpads that route inputs
+      into the factories — the pads hauled materials must be transferred to.
+      Usually one; more than one when several pads feed factories (a tie we name
+      in full). Unset when no pad feeds the factories. */
+  launchpadInputIndices?: number[]
   /** Measured extractor yield: P0 typeId → units/hr, summed over that product's
       extractor programs. The chain model caps P1 output with it, replacing the
       "assume every basic facility runs 24/7" nameplate estimate. */
@@ -179,9 +180,11 @@ const SCHEMATIC_NAME_TO_TIER: Record<string, string> = {
 // Spaceports (launchpads), ESI group 1030 — one type per planet type.
 const LAUNCHPAD_TYPE_IDS = new Set([2256, 2542, 2543, 2544, 2552, 2555, 2556, 2557])
 
-/** Launchpad count + which pad (by transfer-dropdown position) feeds the factories.
-    Pads are ordered by pin_id ascending — creation order, matching the in-game list. */
-function detectLaunchpads(colony: EsiColony): { count: number; inputIndex?: number } {
+/** Launchpad count + which pad(s) (by transfer-dropdown position) feed the factories.
+    Pads are ordered by pin_id ascending — creation order, matching the in-game list.
+    Returns every pad that routes inputs into a factory: one = unambiguous, several =
+    a genuine tie we name in full, none = nothing to hint. */
+function detectLaunchpads(colony: EsiColony): { count: number; inputIndices?: number[] } {
   const pads = colony.pins
     .filter(p => LAUNCHPAD_TYPE_IDS.has(p.type_id))
     .sort((a, b) => a.pin_id - b.pin_id)
@@ -194,12 +197,10 @@ function detectLaunchpads(colony: EsiColony): { count: number; inputIndex?: numb
     const i = padIndexById.get(r.source_pin_id)
     if (i != null && factoryPinIds.has(r.destination_pin_id)) routesIntoFactories[i]++
   }
-  const best = Math.max(...routesIntoFactories)
-  // Ambiguous when no pad feeds factories, or two pads tie — better no hint than a wrong one.
-  const inputIndex = best > 0 && routesIntoFactories.filter(n => n === best).length === 1
-    ? routesIntoFactories.indexOf(best)
-    : undefined
-  return { count: pads.length, ...(inputIndex != null ? { inputIndex } : {}) }
+  const inputIndices = routesIntoFactories
+    .map((n, i) => (n > 0 ? i : -1))
+    .filter(i => i >= 0)
+  return { count: pads.length, ...(inputIndices.length > 0 ? { inputIndices } : {}) }
 }
 
 interface DetectedOutput { typeId: number; tier: string }
@@ -315,7 +316,7 @@ export async function importCharacterFromESI(
       extractorCount: extractorPins.length,
       factoryCount: factoryPins.length,
       ...(launchpads.count > 0 ? { launchpadCount: launchpads.count } : {}),
-      ...(launchpads.inputIndex != null ? { launchpadInputIndex: launchpads.inputIndex } : {}),
+      ...(launchpads.inputIndices ? { launchpadInputIndices: launchpads.inputIndices } : {}),
       ...(Object.keys(extractionRates).length > 0 ? { extractionRates } : {}),
       expiryTime,
     }

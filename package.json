@@ -1,6 +1,6 @@
 {
   "name": "eve-pi",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "EVE Online Planetary Industry visual planner",
   "type": "module",
   "engines": {
