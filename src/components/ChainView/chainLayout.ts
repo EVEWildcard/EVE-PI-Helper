@@ -51,6 +51,10 @@ export interface ChainNode {
   outputName: string        // primary (highest tier) output name, '' when unassigned
   outputTier: PITier        // tier of primary output
   inputNames: string[]      // union of inputs across all schematics
+  // Inputs this planet extracts+refines itself (self-contained P2): shown as
+  // made-on-planet, not missing/imported. For a cluster it's the intersection
+  // across members.
+  selfSuppliedInputs?: string[]
   unassigned: boolean
   column: number
   row: number

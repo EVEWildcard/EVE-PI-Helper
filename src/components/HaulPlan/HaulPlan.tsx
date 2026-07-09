@@ -4,6 +4,7 @@ import { PRODUCT_BY_NAME, SCHEMATIC_INPUTS_BY_NAME, ALL_SCHEMATICS, PRODUCT_BY_T
 import { PLANET_COLOR } from '../../data/planetColors'
 import { TIER_COLOR } from '../../data/tierColors'
 import { validateDeliveryUsage } from './validateDeliveryUsage'
+import { selfSuppliedInputNames, hasExtractors } from '../../selfContained'
 import styles from './HaulPlan.module.css'
 
 // output name → its inputs with per-cycle quantities (all factory cycles are 1h,
@@ -88,8 +89,12 @@ function formatReadyAt(expiryTime: Date, now: number): string {
 const URGENCY_ORDER: Record<Urgency, number> = { expired: 0, critical: 1, warning: 2, ok: 3, idle: 4 }
 const TIER_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
 
+// A planet that runs extractor programs (so it needs periodic reset & collect).
+// Covers both classic P1 extractor planets and self-contained P2 planets that
+// extract → refine → P2 in a closed loop (issue #80): their output tier is P2
+// but they still have live extractor programs that expire.
 function isExtractorPlanet(planet: Planet): boolean {
-  return (planet.outputTiers ?? []).some(t => t === 'P1')
+  return hasExtractors(planet) || (planet.outputTiers ?? []).some(t => t === 'P1')
 }
 
 function tierOf(name: string): string {
@@ -163,7 +168,7 @@ interface DeliverStop {
   inputs: DeliverInput[]
 }
 
-interface ResetItem { planet: Planet; p1s: string[]; urgency: Urgency }
+interface ResetItem { planet: Planet; products: { name: string; tier: string }[]; urgency: Urgency }
 interface DepositSplit { name: string; share: number }
 interface DepositItem { material: string; tier: string; toNames: string[]; splits?: DepositSplit[] }
 
@@ -281,7 +286,9 @@ export function computeSteps(characters: StoredCharacter[], now: number, orderId
       .filter(isExtractorPlanet)
       .map(p => ({
         planet: p,
-        p1s: (p.outputNames ?? []).filter((_, i) => (p.outputTiers ?? [])[i] === 'P1'),
+        // What the extractor planet ultimately makes: P1s for classic extractors,
+        // the P2 for a self-contained closed-loop planet.
+        products: (p.outputNames ?? []).map((name, i) => ({ name, tier: (p.outputTiers ?? [])[i] ?? 'P1' })),
         urgency: getUrgency(p, now),
       }))
       .sort((a, b) => URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency])
@@ -289,10 +296,13 @@ export function computeSteps(characters: StoredCharacter[], now: number, orderId
     const stops: DeliverStop[] = []
     for (const planet of char.planets) {
       const outputs = (planet.outputNames ?? []).map((n, i) => ({ name: n, tier: (planet.outputTiers ?? [])[i] ?? 'P2' }))
+      // Inputs this planet extracts+refines itself (self-contained chain) need no
+      // hauling — exclude them even if another planet also makes that material.
+      const selfMade = selfSuppliedInputNames(planet)
       const needed = new Set<string>()
       for (const out of planet.outputNames ?? [])
         for (const inp of SCHEMATIC_INPUTS_BY_NAME.get(out) ?? [])
-          if (allProduced.has(inp)) needed.add(inp)
+          if (allProduced.has(inp) && !selfMade.has(inp)) needed.add(inp)
       if (needed.size === 0) continue
 
       const inputs: DeliverInput[] = [...needed].map(material => {
@@ -928,9 +938,9 @@ export function HaulPlan({ characters, onRefresh, focusNonce }: Props) {
                       <span className={styles.planetTypeDot} style={{ background: PLANET_COLOR[r.planet.type] }} title={r.planet.type} />
                       <span className={styles.planetName}>{r.planet.name}</span>
                       <div className={styles.chips}>
-                        {r.p1s.map(n => (
-                          <span key={n} className={styles.chip} style={{ '--tier-color': TIER_COLOR.P1 } as React.CSSProperties}>
-                            <span className={styles.chipTier}>P1</span>{n}
+                        {r.products.map(({ name, tier }) => (
+                          <span key={name} className={styles.chip} style={{ '--tier-color': TIER_COLOR[tier as keyof typeof TIER_COLOR] } as React.CSSProperties}>
+                            <span className={styles.chipTier}>{tier}</span>{name}
                           </span>
                         ))}
                       </div>

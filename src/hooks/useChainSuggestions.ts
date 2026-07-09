@@ -6,6 +6,7 @@ import {
 } from '../data/schematics'
 import type { PIProduct, PISchematic } from '../data/schematics'
 import { P1_TO_PLANET_CATEGORIES, P1_TO_P0, CATEGORY_COMMAND_CENTER } from '../data/planetResources'
+import { selfSuppliedInputNames } from '../selfContained'
 import type { BalanceHint } from '../components/ChainView/chainModel'
 import type { SystemPlanetsMap } from './useSystemPlanets'
 
@@ -428,6 +429,9 @@ export function computeChainSuggestions(
     for (const char of characters) {
       for (const planet of char.planets) {
         for (const name of planet.outputNames ?? []) if (name) produced.add(name)
+        // A self-contained P2 planet also makes its own P1 inputs on-planet, so
+        // treat those as produced — don't suggest adding extractors for them.
+        for (const name of selfSuppliedInputNames(planet)) produced.add(name)
       }
     }
 
@@ -795,6 +799,7 @@ export function buildShortfallSuggestion(
   for (const char of characters) {
     for (const planet of char.planets) {
       for (const name of planet.outputNames ?? []) if (name) produced.add(name)
+      for (const name of selfSuppliedInputNames(planet)) produced.add(name)
     }
   }
   // Pretend the short product isn't made yet → walk() emits a step for one more producer

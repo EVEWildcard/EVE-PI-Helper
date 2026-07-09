@@ -7,6 +7,7 @@ import { TIER_COLOR } from '../../data/tierColors'
 import { useChainSuggestions, buildShortfallSuggestion, type ChainSuggestion } from '../../hooks/useChainSuggestions'
 import { useSystemPlanets } from '../../hooks/useSystemPlanets'
 import { buildChainModel, computeBalanceHints, type BalanceHint } from './chainModel'
+import { selfSuppliedInputNames } from '../../selfContained'
 import { SuggestionPlan } from '../SuggestionPlan/SuggestionPlan'
 import { TemplateSearch } from '../TemplateSearch/TemplateSearch'
 import {
@@ -75,6 +76,7 @@ function buildGraph(characters: StoredCharacter[]): {
         outputName,
         outputTier,
         inputNames,
+        selfSuppliedInputs: [...selfSuppliedInputNames(planet)],
         unassigned,
         column: unassigned ? -1 : (TIER_COL[outputTier] ?? 0),
         row: 0
@@ -212,6 +214,10 @@ function clusterDuplicates(nodes: ChainNode[], edges: ChainEdge[]): { nodes: Cha
     // Members share the same output signature, so the rep carries the shared
     // outputs + inputs (keeps input chips, balance-warning + suggestion matching).
     const rep = members[0]
+    // An input is self-supplied for the cluster only if EVERY member self-supplies
+    // it — otherwise some member imports it and the chip mustn't read "made here".
+    const clusterSelfSupplied = (rep.selfSuppliedInputs ?? []).filter(name =>
+      members.every(m => (m.selfSuppliedInputs ?? []).includes(name)))
     clusterNodes.push({
       key: clusterKey,
       planetId: -1,
@@ -225,6 +231,7 @@ function clusterDuplicates(nodes: ChainNode[], edges: ChainEdge[]): { nodes: Cha
       outputName:    rep.outputName,
       outputTier:    rep.outputTier,
       inputNames:    rep.inputNames,
+      selfSuppliedInputs: clusterSelfSupplied,
       unassigned:    false,
       column:        rep.column,
       row:           Math.min(...members.map(m => m.row)),
@@ -1223,16 +1230,20 @@ const PlanetNode = React.forwardRef<HTMLDivElement, PlanetNodeProps>(
     // Shared input-chip renderer — used by both the normal card and the cluster
     // card (all members of a cluster share the same inputs).
     const renderInput = (name: string) => {
+      // Made on THIS planet: it extracts the P0 and refines it to this P1 in a
+      // closed loop (self-contained P2). Wins over "covered elsewhere".
+      const selfMade = node.selfSuppliedInputs?.includes(name) ?? false
       const covered = producedNames.has(name)
       const isSelfExtracted = PRODUCT_BY_NAME.get(name)?.tier === 'P0'
       // Not produced anywhere, but not a genuine gap either — you buy/haul it in.
-      const isImported = !covered && !isSelfExtracted && importedNames.has(name)
-      const cls = isSelfExtracted ? styles.nodeInputSelf
+      const isImported = !selfMade && !covered && !isSelfExtracted && importedNames.has(name)
+      const cls = (selfMade || isSelfExtracted) ? styles.nodeInputSelf
         : covered ? styles.nodeInputCovered
         : isImported ? styles.nodeInputImported
         : styles.nodeInputMissing
-      const title = isSelfExtracted
-        ? `Extracted on this planet (P0 → P1)`
+      const title = selfMade
+        ? `Extracted & refined on this planet (P0 → P1 → output)`
+        : isSelfExtracted ? `Extracted on this planet (P0 → P1)`
         : covered ? `Supplied by another planet`
         : isImported ? `Imported — bought or hauled in, not produced from your own chain`
         : getMissingInputHint(name)

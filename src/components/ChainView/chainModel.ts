@@ -47,6 +47,7 @@ import {
   PRODUCT_BY_TYPE_ID, SCHEMATIC_BY_OUTPUT, ALL_SCHEMATICS,
   type PITier, type PIProduct,
 } from '../../data/schematics'
+import { selfSuppliedInputTypeIds } from '../../selfContained'
 
 const TIER_RANK: Record<PITier, number> = { P0: 0, P1: 1, P2: 2, P3: 3, P4: 4 }
 
@@ -147,6 +148,10 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
   const producerKeys = new Map<number, string[]>()
   const consumerKeys = new Map<number, Set<string>>()
   const producedTypeIds = new Set<number>()
+  // Per produced product: input typeIds every one of its producers extracts and
+  // refines locally (self-contained P2). Those are consumed internally — no
+  // empire demand, no import — so downstream logic treats them as always-there.
+  const selfSuppliedByProduct = new Map<number, Set<number>>()
 
   for (const char of characters) {
     for (const planet of char.planets) {
@@ -159,6 +164,7 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     for (const planet of char.planets) {
       const factories = facilitiesFor(planet)
       const pKey = planetKey(char.characterId, planet.planetId)
+      const selfSup = selfSuppliedInputTypeIds(planet)
       for (const tid of planet.outputs ?? []) {
         const sch = SCHEMATIC_BY_OUTPUT.get(tid)
         if (!sch) continue
@@ -167,9 +173,18 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
         const keys = producerKeys.get(tid) ?? []
         keys.push(pKey)
         producerKeys.set(tid, keys)
+        // Intersect self-supplied inputs across every planet making `tid`: an
+        // input only counts as internal if NO producer of this product imports it.
+        const thisSelf = new Set(sch.inputs
+          .filter(inp => selfSup.has(inp.typeId))
+          .map(inp => inp.typeId))
+        const prev = selfSuppliedByProduct.get(tid)
+        if (prev === undefined) selfSuppliedByProduct.set(tid, thisSelf)
+        else for (const t of [...prev]) if (!thisSelf.has(t)) prev.delete(t)
         for (const inp of sch.inputs) {
           const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
           if (!ip || ip.tier === 'P0') continue  // P0 is self-extracted, never hauled/missing
+          if (selfSup.has(inp.typeId)) continue   // made on this planet — internal, not hauled
           demand.set(inp.typeId, (demand.get(inp.typeId) ?? 0) + inp.quantity * perHr * factories)
           const cons = consumerKeys.get(inp.typeId) ?? new Set<string>()
           cons.add(pKey)
@@ -246,10 +261,12 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     let limitedBy: string | undefined
     const missing: string[] = []
     const imported: string[] = []
+    const selfSup = selfSuppliedByProduct.get(tid)
     if (sch) {
       for (const inp of sch.inputs) {
         const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
         if (!ip || ip.tier === 'P0') continue
+        if (selfSup?.has(inp.typeId)) continue  // extracted+refined on-planet — always available
         if (!producedTypeIds.has(inp.typeId)) {
           // Imported inputs are assumed available (bought/hauled) — they don't break
           // or throttle the chain; only a genuine gap forces realized fraction to 0.
@@ -316,9 +333,11 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
     const visit = (t: number) => {
       const sch = SCHEMATIC_BY_OUTPUT.get(t)
       if (!sch) return
+      const selfSup = selfSuppliedByProduct.get(t)
       for (const inp of sch.inputs) {
         const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
         if (!ip || ip.tier === 'P0') continue
+        if (selfSup?.has(inp.typeId)) continue  // self-contained on-planet — not an import/upstream leg
         if (!producedTypeIds.has(inp.typeId)) {
           // Stop at this sourcing leaf: an imported product is bought finished, so its
           // own sub-inputs aren't ours to track.
