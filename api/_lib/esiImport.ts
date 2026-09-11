@@ -69,6 +69,9 @@ export interface ImportedPlanet {
   ccu: number
   extractorCount: number
   factoryCount: number
+  /** Factory pins per output typeId, intermediates included. Unset when no
+      pin's schematic could be resolved. */
+  factories?: Record<number, number>
   /** How many launchpads the colony has. The in-game transfer dropdown lists
       them in creation order (= ascending pin_id), which is the order we count in. */
   launchpadCount?: number
@@ -205,9 +208,16 @@ function detectLaunchpads(colony: EsiColony): { count: number; inputIndices?: nu
 
 interface DetectedOutput { typeId: number; tier: string }
 
-async function detectOutputs(colony: EsiColony): Promise<DetectedOutput[]> {
+interface DetectedProduction {
+  outputs: DetectedOutput[]
+  /** Factory pins per output typeId, every schematic on the colony —
+      intermediates included, not just the terminal outputs. */
+  factories: Record<number, number>
+}
+
+async function detectOutputs(colony: EsiColony): Promise<DetectedProduction> {
   const factoryPins = colony.pins.filter(p => p.schematic_id != null)
-  if (factoryPins.length === 0) return []
+  if (factoryPins.length === 0) return { outputs: [], factories: {} }
 
   const factoryPinIds = new Set(factoryPins.map(p => p.pin_id))
   const uniqueIds = [...new Set(factoryPins.map(p => p.schematic_id!))]
@@ -224,6 +234,15 @@ async function detectOutputs(colony: EsiColony): Promise<DetectedOutput[]> {
     if (tier && typeId != null) tierByTypeId.set(typeId, tier)
   }
 
+  // Pins per output typeId; pins whose schematic fetch failed or whose name is
+  // unknown are skipped — consumers fall back to the factoryCount heuristic.
+  const factories: Record<number, number> = {}
+  for (const pin of factoryPins) {
+    const s = schematics.get(pin.schematic_id!)
+    const typeId = s ? SCHEMATIC_NAME_TO_TYPE_ID[s.schematic_name] : undefined
+    if (typeId != null) factories[typeId] = (factories[typeId] ?? 0) + 1
+  }
+
   const factoryOutputTypes = new Set<number>()
   const factoryInputTypes = new Set<number>()
   for (const route of colony.routes ?? []) {
@@ -233,7 +252,7 @@ async function detectOutputs(colony: EsiColony): Promise<DetectedOutput[]> {
   const terminals = [...factoryOutputTypes].filter(t => !factoryInputTypes.has(t))
 
   if (terminals.length > 0) {
-    return terminals.map(typeId => ({ typeId, tier: tierByTypeId.get(typeId) ?? 'P1' }))
+    return { outputs: terminals.map(typeId => ({ typeId, tier: tierByTypeId.get(typeId) ?? 'P1' })), factories }
   }
 
   const TIER_ORDER: Record<string, number> = { P1: 1, P2: 2, P3: 3, P4: 4 }
@@ -248,7 +267,7 @@ async function detectOutputs(colony: EsiColony): Promise<DetectedOutput[]> {
     const tier = SCHEMATIC_NAME_TO_TIER[s.schematic_name]
     if (typeId != null && tier && !seen.has(typeId)) { seen.add(typeId); results.push({ typeId, tier }) }
   }
-  return results
+  return { outputs: results, factories }
 }
 
 async function fetchTypeName(typeId: number): Promise<string> {
@@ -286,7 +305,7 @@ export async function importCharacterFromESI(
       pub<EsiPlanetInfo>(`/universe/planets/${ep.planet_id}/`),
       authed<EsiColony>(token, `/characters/${characterId}/planets/${ep.planet_id}/`),
     ])
-    const detected = await detectOutputs(colony)
+    const { outputs: detected, factories } = await detectOutputs(colony)
     const extractorPins = colony.pins.filter(p => p.extractor_details != null)
     const factoryPins = colony.pins.filter(p => p.schematic_id != null)
     const expiries = extractorPins.map(p => p.expiry_time).filter(Boolean) as string[]
@@ -315,6 +334,7 @@ export async function importCharacterFromESI(
       ccu: ep.upgrade_level,
       extractorCount: extractorPins.length,
       factoryCount: factoryPins.length,
+      ...(Object.keys(factories).length > 0 ? { factories } : {}),
       ...(launchpads.count > 0 ? { launchpadCount: launchpads.count } : {}),
       ...(launchpads.inputIndices ? { launchpadInputIndices: launchpads.inputIndices } : {}),
       ...(Object.keys(extractionRates).length > 0 ? { extractionRates } : {}),
