@@ -57,6 +57,7 @@ export interface ImportedCharacter {
     ccu?: number
     extractorCount?: number
     factoryCount?: number
+    factories?: Record<number, number>
     launchpadCount?: number
     launchpadInputIndices?: number[]
     extractionRates?: Record<number, number>
@@ -179,6 +180,7 @@ export const store = {
       ...(p.ccu != null ? { ccu: p.ccu } : {}),
       ...(p.extractorCount != null ? { extractorCount: p.extractorCount } : {}),
       ...(p.factoryCount != null ? { factoryCount: p.factoryCount } : {}),
+      ...(p.factories && Object.keys(p.factories).length > 0 ? { factories: p.factories } : {}),
       ...(p.launchpadCount != null ? { launchpadCount: p.launchpadCount } : {}),
       ...(p.launchpadInputIndices ? { launchpadInputIndices: p.launchpadInputIndices } : {}),
       ...(p.extractionRates && Object.keys(p.extractionRates).length > 0 ? { extractionRates: p.extractionRates } : {}),
