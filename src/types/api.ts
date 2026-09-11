@@ -42,6 +42,10 @@ export interface Planet {
   ccu?: number
   extractorCount?: number
   factoryCount?: number
+  /** Factory pins per output typeId (from ESI pin schematic_ids), including
+      intermediate (non-terminal) schematics. Absent on older imports and manual
+      planets — consumers fall back to factoryCount / outputs.length. */
+  factories?: Record<number, number>
   /** Launchpads on the colony, counted in creation order (ascending pin_id) —
       the same order the in-game transfer dropdown lists them. */
   launchpadCount?: number

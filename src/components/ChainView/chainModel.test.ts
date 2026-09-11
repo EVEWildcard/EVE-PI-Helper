@@ -15,10 +15,15 @@ function tid(name: string): number {
 }
 
 let pid = 1
-function planet(name: string, outputs: string[], factoryCount = 1, extractionRates?: Record<number, number>): Planet {
+function planet(name: string, outputs: string[], factoryCount = 1, extractionRates?: Record<number, number>,
+  factoriesByName?: Record<string, number>): Planet {
+  const factories = factoriesByName
+    ? Object.fromEntries(Object.entries(factoriesByName).map(([n, c]) => [tid(n), c]))
+    : undefined
   return {
     planetId: pid++, type: 'barren', name, outputs: outputs.map(tid), factoryCount,
     ...(extractionRates ? { extractionRates } : {}),
+    ...(factories ? { factories } : {}),
   }
 }
 
@@ -177,6 +182,67 @@ describe('buildChainModel — extraction-capped supply', () => {
     const ext = char('Ext', [planet('E', ['Silicon'], 2, { [p0.typeId]: 1_000_000 })])
     const model = buildChainModel([ext], prices({ Silicon: 100 }))
     expect(model.flows.get(tid('Silicon'))!.supply).toBeCloseTo(nameplate, 5)
+  })
+})
+
+describe('buildChainModel — per-product factory counts', () => {
+  it('uses the exact count on a mixed-tier colony, not factoryCount split by outputs', () => {
+    // 2 Robotics factories + 7 intermediate P2 factories. The heuristic would
+    // assume floor(9/1) = 9 Robotics facilities — 4.5× the real rate.
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Robotics'))!
+    const fac = char('Fac', [planet('F', ['Robotics'], 9, undefined,
+      { Robotics: 2, 'Consumer Electronics': 4, 'Mechanical Parts': 3 })])
+    const model = buildChainModel([fac], prices({ Robotics: 100 }))
+    expect(model.flows.get(tid('Robotics'))!.supply)
+      .toBeCloseTo(sch.output.quantity * (3600 / sch.cycleTime) * 2, 5)
+  })
+
+  it('values each P4 on a multi-product colony at its own single factory (the 3× bug)', () => {
+    // 3 P4 lines with 1 advanced factory each + 6 intermediate P3 factories.
+    // The heuristic saw floor(9/3) = 3 facilities per P4 — 3× the real 1/hr.
+    const outs = ['Broadcast Node', 'Integrity Response Drones', 'Recursive Computing Module']
+    const fac = char('Fac', [planet('F', outs, 9, undefined, {
+      'Broadcast Node': 1, 'Integrity Response Drones': 1, 'Recursive Computing Module': 1,
+      Supercomputers: 3, 'Transcranial Microcontrollers': 3,
+    })])
+    const model = buildChainModel([fac], prices({
+      'Broadcast Node': 100, 'Integrity Response Drones': 100, 'Recursive Computing Module': 100,
+    }))
+    for (const name of outs) {
+      const sch = SCHEMATIC_BY_OUTPUT.get(tid(name))!
+      expect(model.flows.get(tid(name))!.supply)
+        .toBeCloseTo(sch.output.quantity * (3600 / sch.cycleTime), 5)
+    }
+  })
+
+  it('splits unevenly-allocated outputs by their real counts', () => {
+    // 3 + 1 factories; the heuristic would give floor(4/2) = 2 each.
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Silicon'))!
+    const perFac = sch.output.quantity * (3600 / sch.cycleTime)
+    const ext = char('Ext', [planet('E', ['Silicon', 'Chiral Structures'], 4, undefined,
+      { Silicon: 3, 'Chiral Structures': 1 })])
+    const model = buildChainModel([ext], prices({ Silicon: 100, 'Chiral Structures': 100 }))
+    expect(model.flows.get(tid('Silicon'))!.supply).toBeCloseTo(perFac * 3, 5)
+    expect(model.flows.get(tid('Chiral Structures'))!.supply).toBeCloseTo(perFac * 1, 5)
+  })
+
+  it('falls back to the factoryCount heuristic when the field is absent', () => {
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Silicon'))!
+    const perFac = sch.output.quantity * (3600 / sch.cycleTime)
+    const ext = char('Ext', [planet('E', ['Silicon', 'Chiral Structures'], 4)])
+    const model = buildChainModel([ext], prices({ Silicon: 100, 'Chiral Structures': 100 }))
+    expect(model.flows.get(tid('Silicon'))!.supply).toBeCloseTo(perFac * 2, 5) // floor(4/2)
+  })
+
+  it('scales input demand by the consuming output\'s own count, not the colony total', () => {
+    // Only the 2 Robotics factories consume hauled P2s — not all 9 pins.
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid('Robotics'))!
+    const mech = sch.inputs.find(i => i.typeId === tid('Mechanical Parts'))!
+    const fac = char('Fac', [planet('F', ['Robotics'], 9, undefined,
+      { Robotics: 2, 'Consumer Electronics': 4, 'Mechanical Parts': 3 })])
+    const model = buildChainModel([fac], prices({ Robotics: 100 }))
+    expect(model.flows.get(tid('Mechanical Parts'))!.demand)
+      .toBeCloseTo(mech.quantity * (3600 / sch.cycleTime) * 2, 5)
   })
 })
 

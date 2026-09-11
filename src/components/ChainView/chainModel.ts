@@ -111,8 +111,13 @@ export function planetKey(characterId: number, planetId: number): string {
   return `${characterId}:${planetId}`
 }
 
-/** Facilities assumed for one of a planet's outputs — mirrors SetupView's estimate. */
-function facilitiesFor(planet: Planet): number {
+/** Facilities running output `tid` on this planet. Exact when the ESI import
+    recorded per-product pin counts; otherwise the old heuristic of splitting
+    factoryCount evenly across the terminal outputs — which overstates mixed
+    colonies whose factoryCount includes intermediate-tier factories. */
+function facilitiesFor(planet: Planet, tid: number): number {
+  const exact = planet.factories?.[tid]
+  if (exact != null && exact > 0) return exact
   const nOut = Math.max(1, (planet.outputs ?? []).length)
   return Math.max(1, Math.floor((planet.factoryCount ?? 1) / nOut))
 }
@@ -127,7 +132,7 @@ export function planetOutputRate(planet: Planet, tid: number): number {
   const sch = SCHEMATIC_BY_OUTPUT.get(tid)
   if (!sch) return 0
   const perHr = 3600 / sch.cycleTime
-  let rate = sch.output.quantity * perHr * facilitiesFor(planet)
+  let rate = sch.output.quantity * perHr * facilitiesFor(planet, tid)
   const extraction = planet.extractionRates
   if (extraction) {
     for (const inp of sch.inputs) {
@@ -162,13 +167,13 @@ export function buildChainModel(characters: StoredCharacter[], prices: Record<nu
   // One pass: accumulate supply (from each output) and demand (on each input).
   for (const char of characters) {
     for (const planet of char.planets) {
-      const factories = facilitiesFor(planet)
       const pKey = planetKey(char.characterId, planet.planetId)
       const selfSup = selfSuppliedInputTypeIds(planet)
       for (const tid of planet.outputs ?? []) {
         const sch = SCHEMATIC_BY_OUTPUT.get(tid)
         if (!sch) continue
         const perHr = 3600 / sch.cycleTime
+        const factories = facilitiesFor(planet, tid)
         supply.set(tid, (supply.get(tid) ?? 0) + planetOutputRate(planet, tid))
         const keys = producerKeys.get(tid) ?? []
         keys.push(pKey)
