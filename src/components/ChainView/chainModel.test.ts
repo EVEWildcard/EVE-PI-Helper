@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { Planet, StoredCharacter } from '../../types/api'
 import { DEFAULT_PI_SKILLS } from '../../types/api'
 import { PRODUCT_BY_NAME, SCHEMATIC_BY_OUTPUT } from '../../data/schematics'
-import { buildChainModel, computeBalanceHints, planetKey } from './chainModel'
+import { buildChainModel, computeBalanceHints, planetKey, planetValueAddedPerHr } from './chainModel'
 import { filterToChain } from './chainFocus'
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
@@ -399,5 +399,74 @@ describe('filterToChain — single-chain focus', () => {
     const f = focused[0].planets.find(p => p.name === 'F')!
     const orig = emp.planets.find(p => p.name === 'F')!
     expect(f).toBe(orig) // untrimmed planets pass through by reference
+  })
+})
+
+describe('planetValueAddedPerHr', () => {
+  // Nameplate units/hr for one facility of `name`.
+  const rate1 = (name: string) => {
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid(name))!
+    return sch.output.quantity * (3600 / sch.cycleTime)
+  }
+  // Units/hr of `inpName` one facility of `outName` consumes.
+  const consPerHr = (outName: string, inpName: string) => {
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid(outName))!
+    const inp = sch.inputs.find(i => i.typeId === tid(inpName))!
+    return inp.quantity * (3600 / sch.cycleTime)
+  }
+
+  it('values an extractor P1 planet gross — P0 inputs are free', () => {
+    const p = planet('E', ['Silicon'])
+    expect(planetValueAddedPerHr(p, prices({ Silicon: 100 })))
+      .toBeCloseTo(rate1('Silicon') * 100, 5)
+  })
+
+  it('nets hauled input value out of a factory planet', () => {
+    const p = planet('F', ['Miniature Electronics'])
+    const px = prices({ 'Miniature Electronics': 1000, Silicon: 40, 'Chiral Structures': 60 })
+    const expected = rate1('Miniature Electronics') * 1000
+      - consPerHr('Miniature Electronics', 'Silicon') * 40
+      - consPerHr('Miniature Electronics', 'Chiral Structures') * 60
+    expect(planetValueAddedPerHr(p, px)).toBeCloseTo(expected, 5)
+  })
+
+  it('does not double-count a feeder: empire sum telescopes to terminal value', () => {
+    // One basic factory per P1 feeds one P2 line exactly (P1 supply == demand),
+    // so the P1 legs cancel and the empire total is the P2 output value alone —
+    // the gross sum would have counted each P1 twice.
+    const ext = planet('E', ['Silicon', 'Chiral Structures'])
+    const fac = planet('F', ['Miniature Electronics'])
+    const px = prices({ 'Miniature Electronics': 1000, Silicon: 40, 'Chiral Structures': 60 })
+    // fixture sanity: the P1 legs really are balanced
+    expect(rate1('Silicon')).toBeCloseTo(consPerHr('Miniature Electronics', 'Silicon'), 5)
+    expect(rate1('Chiral Structures')).toBeCloseTo(consPerHr('Miniature Electronics', 'Chiral Structures'), 5)
+    const sum = planetValueAddedPerHr(ext, px) + planetValueAddedPerHr(fac, px)
+    expect(sum).toBeCloseTo(rate1('Miniature Electronics') * 1000, 5)
+  })
+
+  it('does not bill self-supplied inputs on a self-contained P2 planet', () => {
+    // The planet extracts every P0 behind its P1 inputs, so the P1s are made
+    // on-planet for free — netting them would penalize a closed-loop colony.
+    const coolSch = SCHEMATIC_BY_OUTPUT.get(tid('Coolant'))!
+    const extraction: Record<number, number> = {}
+    for (const inp of coolSch.inputs) {
+      const p1Sch = SCHEMATIC_BY_OUTPUT.get(inp.typeId)!
+      for (const p0 of p1Sch.inputs) extraction[p0.typeId] = 10_000
+    }
+    const p = planet('C', ['Coolant'], 1, extraction)
+    const px = prices({ Coolant: 500, Water: 100, Electrolytes: 100 })
+    expect(planetValueAddedPerHr(p, px)).toBeCloseTo(rate1('Coolant') * 500, 5)
+  })
+
+  it('treats unpriced inputs as free', () => {
+    const p = planet('F', ['Miniature Electronics'])
+    expect(planetValueAddedPerHr(p, prices({ 'Miniature Electronics': 1000 })))
+      .toBeCloseTo(rate1('Miniature Electronics') * 1000, 5)
+  })
+
+  it('goes negative when the inputs are worth more than the output', () => {
+    const p = planet('F', ['Miniature Electronics'])
+    const px = prices({ 'Miniature Electronics': 1, Silicon: 1000, 'Chiral Structures': 1000 })
+    expect(planetValueAddedPerHr(p, px)).toBeLessThan(0)
   })
 })
