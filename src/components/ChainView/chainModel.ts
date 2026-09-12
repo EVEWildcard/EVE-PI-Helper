@@ -147,6 +147,38 @@ export function planetOutputRate(planet: Planet, tid: number): number {
   return rate
 }
 
+/**
+ * Net ISK/hr this planet ADDS to the empire: output value minus the market
+ * value of the hauled inputs its factories consume (nameplate rate — the same
+ * demand the chain model charges). P0 and self-supplied inputs are free;
+ * unpriced products count as 0 on either side.
+ *
+ * Why netting: valuing every planet's output gross double-counts feeders — a
+ * P2 planet's output value already embeds the P1 it consumes, so gross P1 +
+ * gross P2 counts the P1 twice. Value-added telescopes instead: summed across
+ * planets, internal supply/demand cancels and the total is terminal output
+ * value minus imported-input cost. Can be negative when a recipe is worth less
+ * than its inputs (the chain model's sell-instead situation).
+ */
+export function planetValueAddedPerHr(planet: Planet, prices: Record<number, number>): number {
+  let total = 0
+  const selfSup = selfSuppliedInputTypeIds(planet)
+  for (const tid of planet.outputs ?? []) {
+    const sch = SCHEMATIC_BY_OUTPUT.get(tid)
+    if (!sch) continue
+    total += planetOutputRate(planet, tid) * (prices[tid] ?? 0)
+    const perHr = 3600 / sch.cycleTime
+    const factories = facilitiesFor(planet, tid)
+    for (const inp of sch.inputs) {
+      const ip = PRODUCT_BY_TYPE_ID.get(inp.typeId)
+      if (!ip || ip.tier === 'P0') continue      // P0 is self-extracted, free
+      if (selfSup.has(inp.typeId)) continue      // made on-planet from own P0
+      total -= inp.quantity * perHr * factories * (prices[inp.typeId] ?? 0)
+    }
+  }
+  return total
+}
+
 export function buildChainModel(characters: StoredCharacter[], prices: Record<number, number>): ChainModel {
   const supply = new Map<number, number>()        // typeId → units/hr produced
   const demand = new Map<number, number>()        // typeId → units/hr consumed (non-P0 inputs)
