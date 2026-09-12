@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react'
 import type { StoredCharacter, PISkillLevels, Planet } from '../../types/api'
 import { SkillBar, PI_SKILLS } from '../SkillEditor/SkillEditor'
 import { PRODUCT_BY_TYPE_ID } from '../../data/schematics'
-import { planetOutputRate } from '../ChainView/chainModel'
+import { planetValueAddedPerHr } from '../ChainView/chainModel'
 import { seedEmpireByAccounts, clearTestData, MAX_ACCOUNTS, ALTS_PER_ACCOUNT, DEFAULT_DEV_ACCOUNTS, type SeedProfile } from '../../dev/seedData'
 import { POWER_USER_ACCOUNTS } from '../../capacity'
 import styles from './SetupView.module.css'
@@ -54,6 +54,7 @@ import { DEV_TOOLS } from '../../dev/devTools'
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatIsk(isk: number): string {
+  if (isk < 0) return `-${formatIsk(-isk)}`
   if (isk >= 1_000_000_000) return `${(isk / 1_000_000_000).toFixed(2)}B`
   if (isk >= 1_000_000)     return `${(isk / 1_000_000).toFixed(1)}M`
   if (isk >= 1_000)         return `${(isk / 1_000).toFixed(0)}K`
@@ -146,7 +147,7 @@ function PlanetRow({ planet, onRename, hideOutputTier, prices }: PlanetRowProps)
   const isExtractor = planetIsExtractor(planet)
   const isIdleFactory = planetIsIdleFactory(planet)
   const isActive = planetIsActive(planet)
-  const totalIskPerHr = planetIskPerHr(planet, prices)
+  const valueAddedPerHr = planetValueAddedPerHr(planet, prices)
 
   return (
     <div className={styles.planetEntry}>
@@ -209,7 +210,7 @@ function PlanetRow({ planet, onRename, hideOutputTier, prices }: PlanetRowProps)
               </span>
             )}
           </div>
-          {(outputs.length > 0 || totalIskPerHr > 0) && (
+          {(outputs.length > 0 || valueAddedPerHr !== 0) && (
             <div className={styles.planetInfoBottom}>
               {outputs.map(o => (
                 <span
@@ -221,14 +222,14 @@ function PlanetRow({ planet, onRename, hideOutputTier, prices }: PlanetRowProps)
                   {o.name}
                 </span>
               ))}
-              {totalIskPerHr > 0 && (
+              {valueAddedPerHr !== 0 && (
                 <span
                   className={`${styles.iskPerHr} ${!isActive ? styles.iskPerHrIdle : ''}`}
                   title={isActive
-                    ? `Estimated using market average prices × output rate`
+                    ? `Estimated value added — output value minus hauled input cost, at market average prices`
                     : `Extractor cycle not running — potential if active`}
                 >
-                  ≈ {formatIsk(totalIskPerHr)}/hr
+                  ≈ {formatIsk(valueAddedPerHr)}/hr
                 </span>
               )}
             </div>
@@ -512,17 +513,6 @@ function planetIsIdleFactory(planet: Planet): boolean {
   return !planetIsExtractor(planet) && (planet.factoryCount ?? 0) > 0 && (planet.outputs?.length ?? 0) === 0
 }
 
-// Schematic rate × facilities, extraction-capped where measured — shared with
-// the chain model (planetOutputRate) so Setup and Chain tell the same story.
-function planetIskPerHr(planet: Planet, prices: Record<number, number>): number {
-  const outs = planet.outputs ?? []
-  if (outs.length === 0) return 0
-  return outs.reduce((sum, tid) => {
-    const price = prices[tid]
-    if (!price) return sum
-    return sum + planetOutputRate(planet, tid) * price
-  }, 0)
-}
 
 interface CharStat {
   char: StoredCharacter
@@ -537,7 +527,7 @@ interface CharStat {
   factories: number
   expiredCount: number
   idleCount: number
-  iskPerHr: number      // running output only (active planets)
+  iskPerHr: number      // value added by active planets (output minus hauled input cost)
   noPlanets: boolean
 }
 
@@ -555,7 +545,7 @@ function computeCharStat(char: StoredCharacter, prices: Record<number, number>):
     factories: char.planets.filter(p => !planetIsExtractor(p)).length,
     expiredCount: char.planets.filter(planetIsExpiredExtractor).length,
     idleCount: char.planets.filter(planetIsIdleFactory).length,
-    iskPerHr: char.planets.reduce((sum, p) => sum + (planetIsActive(p) ? planetIskPerHr(p, prices) : 0), 0),
+    iskPerHr: char.planets.reduce((sum, p) => sum + (planetIsActive(p) ? planetValueAddedPerHr(p, prices) : 0), 0),
     noPlanets: piEnabled && planetsUsed === 0,
   }
 }
@@ -653,7 +643,7 @@ function WorkforceBar({ stats, filter, setFilter }: {
         <span className={styles.wfMeta}>
           {agg.accounts} account{agg.accounts === 1 ? '' : 's'} · {agg.piToons} PI toon{agg.piToons === 1 ? '' : 's'} · {agg.totalPlanets} planets
         </span>
-        <span className={styles.wfHero} title="Estimated running output — active planets only, at market-average prices">
+        <span className={styles.wfHero} title="Estimated net value added — active planets only, hauled inputs netted at market-average prices; feeder planets aren't double-counted">
           ≈ {formatIsk(agg.empireIsk)}<span className={styles.wfHeroSub}>/hr</span>
         </span>
       </div>
